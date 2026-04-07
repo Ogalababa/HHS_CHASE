@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional, TYPE_CHECKING
 
-from .charging_curve import ChargingCurve
+from .charging_curve import DEFAULT_CHARGING_CURVE, ChargingCurve
 
 # Use TYPE_CHECKING to avoid circular import for type hinting
 if TYPE_CHECKING:
@@ -62,6 +62,7 @@ class Bus:
         soc_disp_cval: Optional[float] = None,
         average_energy_consumption: Optional[float] = None,
         charging_loss_kw: float = 4.0,
+        charging_curve: ChargingCurve | None = None,
     ):
         """
         Initializes a new Bus instance.
@@ -122,6 +123,7 @@ class Bus:
         self.connected_charge_point: Optional["ChargePoint"] = None  # Currently connected charge point (if any)
         # Charging characteristics (dynamic charging envelope)
         self.charging_loss_kw = max(0.0, float(charging_loss_kw))
+        self.charging_curve: ChargingCurve = charging_curve or DEFAULT_CHARGING_CURVE
 
     def __repr__(self) -> str:
         """Returns a developer-friendly string representation of the Bus."""
@@ -252,7 +254,7 @@ class Bus:
         - Stage B: 87 <= SoC < 97: P_cap = 282 - 5.2 * (SoC - 87)
         - Stage C: 97 <= SoC <= 100: P_cap = 230 * (100 - SoC) / 3
         """
-        return ChargingCurve.power_cap_kw(soc_percent)
+        return DEFAULT_CHARGING_CURVE.power_cap_kw(soc_percent)
 
     def calculate_actual_charging_power_kw(self, charger_offered_power_kw: float) -> float:
         """
@@ -266,7 +268,7 @@ class Bus:
         - P_loss is modeled as a constant auxiliary + conversion loss (default 4kW).
         - Result is clamped to >= 0.
         """
-        return ChargingCurve.actual_battery_power_kw(
+        return self.charging_curve.actual_battery_power_kw(
             soc_percent=self.soc_percent,
             charger_offered_power_kw=charger_offered_power_kw,
             charging_loss_kw=self.charging_loss_kw,

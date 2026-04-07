@@ -13,19 +13,40 @@ domain layer free of external dependencies.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 
+
+@dataclass(frozen=True, slots=True)
 class ChargingCurve:
     """
     Vehicle charging power acceptance envelope (P_cap) as a function of SoC.
 
-    The current implementation preserves the existing piecewise-linear envelope
-    that was previously implemented on `Bus`.
+    Default parameters preserve the existing piecewise-linear envelope that was
+    previously implemented on `Bus`, with the default stage thresholds:
+    - **Stage A end**: 87%
+    - **Stage B end**: 97%
 
-    Rationale: A small, dependency-free class is sufficient here. We avoid
-    introducing configuration frameworks or infrastructure concerns into the
-    domain. If the curve needs calibration later, this class can be extended to
-    accept parameters or be replaced via a port.
+    Rationale: Making the curve parameterizable keeps the physical assumptions
+    explicit and calibratable without changing the `Bus` entity. This aligns
+    with hexagonal architecture by keeping core domain logic deterministic and
+    free of infrastructure dependencies.
     """
+
+    # --- Default envelope parameters (match previous behavior) ---
+    stage_a_end_soc: float = 87.0
+    stage_b_end_soc: float = 97.0
+
+    # Stage A: P = a_base + a_slope * SoC
+    a_base_kw: float = 250.0
+    a_slope_kw_per_soc: float = 0.368
+
+    # Stage B: P = b_start_kw - b_slope * (SoC - stage_a_end_soc)
+    b_start_kw: float = 282.0
+    b_slope_kw_per_soc: float = 5.2
+
+    # Stage C tail: P = c_factor_kw * (100 - SoC) / c_divisor_soc
+    c_factor_kw: float = 230.0
+    c_divisor_soc: float = 3.0
 
     @staticmethod
     def clamp_soc_percent(value: float) -> float:
@@ -36,30 +57,30 @@ class ChargingCurve:
             return 100.0
         return float(value)
 
-    @classmethod
-    def power_cap_kw(cls, soc_percent: float) -> float:
+    def power_cap_kw(self, soc_percent: float) -> float:
         """
         Charging power acceptance limit (P_cap(SoC)) in kW.
 
         Piecewise envelope (SoC in %):
-        - Stage A: 0 <= SoC < 87:  P_cap = 250 + 0.368 * SoC
-        - Stage B: 87 <= SoC < 97: P_cap = 282 - 5.2 * (SoC - 87)
-        - Stage C: 97 <= SoC <= 100: P_cap = 230 * (100 - SoC) / 3
+        - Stage A: 0 <= SoC < stage_a_end_soc:  P_cap = a_base_kw + a_slope_kw_per_soc * SoC
+        - Stage B: stage_a_end_soc <= SoC < stage_b_end_soc:
+                   P_cap = b_start_kw - b_slope_kw_per_soc * (SoC - stage_a_end_soc)
+        - Stage C: stage_b_end_soc <= SoC <= 100:
+                   P_cap = c_factor_kw * (100 - SoC) / c_divisor_soc
         """
-        soc = cls.clamp_soc_percent(float(soc_percent))
+        soc = self.clamp_soc_percent(float(soc_percent))
 
-        if soc < 87.0:
-            return 250.0 + (0.368 * soc)
-        if soc < 97.0:
-            return 282.0 - 5.2 * (soc - 87.0)
-        # 97% - 100% tail-off to zero
+        if soc < self.stage_a_end_soc:
+            return self.a_base_kw + (self.a_slope_kw_per_soc * soc)
+        if soc < self.stage_b_end_soc:
+            return self.b_start_kw - self.b_slope_kw_per_soc * (soc - self.stage_a_end_soc)
+        # Tail-off to zero
         if soc <= 100.0:
-            return 230.0 * (100.0 - soc) / 3.0
+            return self.c_factor_kw * (100.0 - soc) / float(self.c_divisor_soc)
         return 0.0
 
-    @classmethod
     def actual_battery_power_kw(
-        cls, *, soc_percent: float, charger_offered_power_kw: float, charging_loss_kw: float = 4.0
+        self, *, soc_percent: float, charger_offered_power_kw: float, charging_loss_kw: float = 4.0
     ) -> float:
         """
         Compute actual charging power into the battery (kW).
@@ -74,6 +95,10 @@ class ChargingCurve:
         offered = max(0.0, float(charger_offered_power_kw))
         loss = max(0.0, float(charging_loss_kw))
         p_available = max(0.0, offered - loss)
-        p_cap = cls.power_cap_kw(soc_percent)
+        p_cap = self.power_cap_kw(soc_percent)
         return min(p_available, p_cap)
+
+
+DEFAULT_CHARGING_CURVE = ChargingCurve()
+
 
