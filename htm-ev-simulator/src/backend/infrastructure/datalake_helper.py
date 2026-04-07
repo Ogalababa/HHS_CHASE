@@ -9,6 +9,7 @@ so core/domain stays independent from Azure SDKs and storage layouts.
 from __future__ import annotations
 
 import io
+import os
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
@@ -16,8 +17,8 @@ from typing import Optional
 import pandas as pd
 
 
-DEFAULT_STORAGE_ACCOUNT = "REDACTED_STORAGE_ACCOUNT"
-DEFAULT_FILESYSTEM = ""
+ENV_STORAGE_ACCOUNT = "DATALAKE_STORAGE_ACCOUNT"
+ENV_DEFAULT_FILESYSTEM = "DATALAKE_FILESYSTEM"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,8 +30,24 @@ class DataLakeConfig:
     accounts/filesystems in tests or environments without scattering constants.
     """
 
-    storage_account: str = DEFAULT_STORAGE_ACCOUNT
-    filesystem: str = DEFAULT_FILESYSTEM
+    storage_account: Optional[str] = None
+    filesystem: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        # Pull defaults from env to avoid leaking account names in git.
+        if self.storage_account is None:
+            object.__setattr__(self, "storage_account", os.getenv(ENV_STORAGE_ACCOUNT))
+        if self.filesystem is None:
+            object.__setattr__(self, "filesystem", os.getenv(ENV_DEFAULT_FILESYSTEM))
+
+        if not self.storage_account:
+            raise RuntimeError(
+                f"Missing ADLS storage account. Set {ENV_STORAGE_ACCOUNT} in your environment (.env)."
+            )
+        if not self.filesystem:
+            raise RuntimeError(
+                f"Missing ADLS filesystem. Set {ENV_DEFAULT_FILESYSTEM} in your environment (.env)."
+            )
 
     @property
     def account_url(self) -> str:
@@ -73,6 +90,24 @@ def _read_parquet_file(*, service, filesystem: str, path: str) -> pd.DataFrame:
     file_client = fs.get_file_client(path)
     data = file_client.download_file().readall()
     return pd.read_parquet(io.BytesIO(data))
+
+
+def read_parquet(
+    *,
+    filesystem: str,
+    path: str,
+    config: Optional[DataLakeConfig] = None,
+) -> pd.DataFrame:
+    """
+    Read a single parquet file from ADLS.
+
+    Rationale: Many reference datasets (e.g., Maximo assets) are stored as a
+    single parquet file rather than daily partitions. This helper keeps the
+    calling adapters simple and keeps ADLS details encapsulated.
+    """
+    cfg = config or DataLakeConfig()
+    service = _get_service_client(cfg)
+    return _read_parquet_file(service=service, filesystem=filesystem, path=path)
 
 
 def load_parquet_range(
