@@ -10,6 +10,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional, TYPE_CHECKING
 
+from .charging_curve import ChargingCurve
+
 # Use TYPE_CHECKING to avoid circular import for type hinting
 if TYPE_CHECKING:
     from ...planning.block import Block
@@ -238,11 +240,7 @@ class Bus:
     @staticmethod
     def _clamp_soc_percent(value: float) -> float:
         """Clamp SOC to [0, 100] for envelope calculation."""
-        if value < 0.0:
-            return 0.0
-        if value > 100.0:
-            return 100.0
-        return value
+        return ChargingCurve.clamp_soc_percent(value)
 
     @classmethod
     def charging_power_cap_kw(cls, soc_percent: float) -> float:
@@ -254,16 +252,7 @@ class Bus:
         - Stage B: 87 <= SoC < 97: P_cap = 282 - 5.2 * (SoC - 87)
         - Stage C: 97 <= SoC <= 100: P_cap = 230 * (100 - SoC) / 3
         """
-        soc = cls._clamp_soc_percent(float(soc_percent))
-
-        if soc < 87.0:
-            return 250.0 + (0.368 * soc)
-        if soc < 97.0:
-            return 282.0 - 5.2 * (soc - 87.0)
-        # 97% - 100% tail-off to zero
-        if soc <= 100.0:
-            return 230.0 * (100.0 - soc) / 3.0
-        return 0.0
+        return ChargingCurve.power_cap_kw(soc_percent)
 
     def calculate_actual_charging_power_kw(self, charger_offered_power_kw: float) -> float:
         """
@@ -277,7 +266,8 @@ class Bus:
         - P_loss is modeled as a constant auxiliary + conversion loss (default 4kW).
         - Result is clamped to >= 0.
         """
-        offered = max(0.0, float(charger_offered_power_kw))
-        p_cap = self.charging_power_cap_kw(self.soc_percent)
-        p_available = max(0.0, offered - self.charging_loss_kw)
-        return min(p_available, p_cap)
+        return ChargingCurve.actual_battery_power_kw(
+            soc_percent=self.soc_percent,
+            charger_offered_power_kw=charger_offered_power_kw,
+            charging_loss_kw=self.charging_loss_kw,
+        )
