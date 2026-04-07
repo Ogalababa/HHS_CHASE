@@ -2,7 +2,7 @@
 # /models/transport/charge_point.py
 from __future__ import annotations
 
-from models.transport.bus import Bus, BusState
+from ..transport.bus import Bus, BusState
 
 
 class ChargePoint:

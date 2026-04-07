@@ -12,9 +12,9 @@ from typing import List, Optional, TYPE_CHECKING
 
 # Use TYPE_CHECKING to avoid circular import for type hinting
 if TYPE_CHECKING:
-    from models.planning.block import Block
-    from models.planning.point_in_sequence import PointInSequence
-    from models.laad_infra.charge_point import ChargePoint
+    from ...planning.block import Block
+    from ...planning.point_in_sequence import PointInSequence
+    from ...laad_infra.charge_point import ChargePoint
 
 
 class BusState(str, Enum):

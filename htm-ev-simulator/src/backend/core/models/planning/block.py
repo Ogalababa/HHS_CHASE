@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from models.planning.journey import Journey
+from .journey import Journey
 
 
 class Block:
