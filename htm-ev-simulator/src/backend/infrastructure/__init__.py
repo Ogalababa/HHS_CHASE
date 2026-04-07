@@ -5,3 +5,11 @@ Rationale: Adapters live outside the core to avoid leaking external dependencies
 into the domain. Declaring this package supports clean imports and testing.
 """
 
+from __future__ import annotations
+
+from .omniplus_bus_provider import OmniplusBusProvider
+
+__all__ = [
+    "OmniplusBusProvider",
+]
+
