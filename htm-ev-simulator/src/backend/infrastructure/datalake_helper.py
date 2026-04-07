@@ -9,12 +9,13 @@ so core/domain stays independent from Azure SDKs and storage layouts.
 from __future__ import annotations
 
 import io
-import os
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
 
 import pandas as pd
+
+from .env_loader import get_env
 
 
 ENV_STORAGE_ACCOUNT = "DATALAKE_STORAGE_ACCOUNT"
@@ -34,11 +35,11 @@ class DataLakeConfig:
     filesystem: Optional[str] = None
 
     def __post_init__(self) -> None:
-        # Pull defaults from env to avoid leaking account names in git.
+        # Pull defaults from env/.env to avoid leaking account names in git.
         if self.storage_account is None:
-            object.__setattr__(self, "storage_account", os.getenv(ENV_STORAGE_ACCOUNT))
+            object.__setattr__(self, "storage_account", get_env(ENV_STORAGE_ACCOUNT))
         if self.filesystem is None:
-            object.__setattr__(self, "filesystem", os.getenv(ENV_DEFAULT_FILESYSTEM))
+            object.__setattr__(self, "filesystem", get_env(ENV_DEFAULT_FILESYSTEM))
 
         if not self.storage_account:
             raise RuntimeError(
