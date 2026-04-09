@@ -41,6 +41,11 @@ def filter_bus_assets(df: pd.DataFrame, *, query: MaximoAssetQuery) -> pd.DataFr
         "htm_vendor_serialnum",
         "isrunning",
     }
+    optional_columns = {
+        # If present in Maximo, can be used to configure vehicle-side charging limit.
+        # (kW, numeric)
+        "max_charging_power_kw",
+    }
 
     missing = required_columns - set(df.columns)
     if missing:
@@ -60,7 +65,8 @@ def filter_bus_assets(df: pd.DataFrame, *, query: MaximoAssetQuery) -> pd.DataFr
     # filter range (exclusive, matching original code)
     out = out[(out["assetnum"] > query.assetnum_min) & (out["assetnum"] < query.assetnum_max)]
 
-    return out[list(required_columns)].copy()
+    keep = list(required_columns) + [c for c in optional_columns if c in out.columns]
+    return out[keep].copy()
 
 
 @dataclass(slots=True)

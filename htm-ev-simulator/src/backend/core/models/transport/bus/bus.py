@@ -63,6 +63,7 @@ class Bus:
         average_energy_consumption: Optional[float] = None,
         charging_loss_kw: float = 4.0,
         charging_curve: ChargingCurve | None = None,
+        max_charging_power_kw: float | None = 282.0,
     ):
         """
         Initializes a new Bus instance.
@@ -124,6 +125,9 @@ class Bus:
         # Charging characteristics (dynamic charging envelope)
         self.charging_loss_kw = max(0.0, float(charging_loss_kw))
         self.charging_curve: ChargingCurve = charging_curve or DEFAULT_CHARGING_CURVE
+        self.max_charging_power_kw: float | None = (
+            None if max_charging_power_kw is None else max(0.0, float(max_charging_power_kw))
+        )
 
     def __repr__(self) -> str:
         """Returns a developer-friendly string representation of the Bus."""
@@ -268,8 +272,11 @@ class Bus:
         - P_loss is modeled as a constant auxiliary + conversion loss (default 4kW).
         - Result is clamped to >= 0.
         """
-        return self.charging_curve.actual_battery_power_kw(
+        p_actual = self.charging_curve.actual_battery_power_kw(
             soc_percent=self.soc_percent,
             charger_offered_power_kw=charger_offered_power_kw,
             charging_loss_kw=self.charging_loss_kw,
         )
+        if self.max_charging_power_kw is not None:
+            return min(float(p_actual), float(self.max_charging_power_kw))
+        return float(p_actual)

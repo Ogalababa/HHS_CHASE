@@ -23,6 +23,7 @@ class TestMaximoAssetProvider(unittest.TestCase):
                     "htm_tramtype": "E-BUS",
                     "htm_vendor_serialnum": "WEB2863141M144820",
                     "isrunning": 1,
+                    "max_charging_power_kw": 250.0,
                 },
                 # invalid serial prefix
                 {
@@ -52,6 +53,8 @@ class TestMaximoAssetProvider(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(int(out.iloc[0]["assetnum"]), 1500)
         self.assertTrue(str(out.iloc[0]["htm_vendor_serialnum"]).startswith("WEB"))
+        self.assertIn("max_charging_power_kw", out.columns)
+        self.assertAlmostEqual(float(out.iloc[0]["max_charging_power_kw"]), 250.0, places=6)
 
 
 if __name__ == "__main__":
