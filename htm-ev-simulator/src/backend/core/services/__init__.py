@@ -12,6 +12,12 @@ from .simpy_charging_simulation import (
     ChargingTrace as SimpyChargingTrace,
     simulate_charging_soc_trace_simpy,
 )
+from .visualization_simulation import (
+    ClassifiedLogger,
+    VisualizationSimulationResult,
+    VisualizationSimulationService,
+    VisualizationWorldView,
+)
 from .world_builder import WorldBuildResult, WorldBuilder
 
 __all__ = [
@@ -19,6 +25,10 @@ __all__ = [
     "ChargingTrace",
     "simulate_charging_soc_trace_simpy",
     "SimpyChargingTrace",
+    "VisualizationSimulationService",
+    "VisualizationSimulationResult",
+    "VisualizationWorldView",
+    "ClassifiedLogger",
     "WorldBuilder",
     "WorldBuildResult",
 ]

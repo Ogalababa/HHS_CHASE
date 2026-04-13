@@ -1,2 +1,4 @@
 simpy
+fastapi
+uvicorn
 
