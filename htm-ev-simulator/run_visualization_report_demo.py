@@ -198,6 +198,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--low-soc-threshold", type=float, default=14.0, help="Low SOC threshold for warning events.")
     parser.add_argument("--charge-target-soc", type=float, default=85.0, help="Target SOC for charging sessions.")
     parser.add_argument("--charge-step-seconds", type=int, default=300, help="Charging simulation step in seconds.")
+    parser.add_argument(
+        "--enable-precheck-replacement-strategy",
+        action="store_true",
+        help="Before each journey, precheck SOC and trigger 8xxxxxx return + 9xxxxxx replacement dispatch when insufficient.",
+    )
+    parser.add_argument(
+        "--enable-opportunity-charging-strategy",
+        action="store_true",
+        help="Enable opportunity charging when terminal has charger, SOC<80%%, and layover exceeds 30 minutes.",
+    )
 
     parser.add_argument(
         "--report-path",
@@ -363,6 +373,8 @@ def main() -> None:
         low_soc_alert_threshold_percent=args.low_soc_threshold,
         charging_target_soc_percent=args.charge_target_soc,
         charging_step_seconds=args.charge_step_seconds,
+        enable_precheck_replacement_strategy=args.enable_precheck_replacement_strategy,
+        enable_opportunity_charging_strategy=args.enable_opportunity_charging_strategy,
     )
     simulation = simulation_service.run(world)
     config = DemoSimulationConfig(

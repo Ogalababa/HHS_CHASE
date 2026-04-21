@@ -73,7 +73,7 @@ def generate_bus_status_section(
         bus_vin = log.get('bus_vin')
         time = log.get('time')
         
-        if not bus_vin or not time:
+        if not bus_vin or time is None:
             continue
         
         if event_type == 'state_update':
@@ -100,11 +100,11 @@ def generate_bus_status_section(
             bus_vin = log.get('bus_vin')
             time = log.get('time')
             
-            if not bus_vin or not time:
+            if not bus_vin or time is None:
                 continue
             
-            # Extract SOC from charging_progress and charging_started events
-            if event_type in ['charging_progress', 'charging_started']:
+            # Extract SOC from charging events (including stop snapshots).
+            if event_type in ['charging_progress', 'charging_started', 'charging_stopped']:
                 soc = log.get('soc_percent')
                 if soc is not None:
                     # Update SOC timeline - charging events provide SOC updates during charging
@@ -146,15 +146,26 @@ def generate_bus_status_section(
         time = log.get('time')
         block_id = log.get('block_id')
         
-        if not bus_vin or not time:
+        if not bus_vin or time is None:
             continue
         
         if event_type == 'block_assigned':
             bus_assigned_blocks[bus_vin][time] = block_id
+        elif event_type == 'journey_start' and block_id:
+            # Journey start implies this bus is actively serving this block.
+            bus_assigned_blocks[bus_vin][time] = block_id
+        elif event_type == 'journey_replacement' and block_id:
+            # Replacement bus takes over current block at replacement time.
+            replacement_bus_vin = log.get('replacement_bus_vin')
+            replacement_time = log.get('time')
+            if replacement_bus_vin and replacement_time is not None:
+                bus_assigned_blocks[replacement_bus_vin][replacement_time] = block_id
         elif event_type == 'block_completed':
             # Block completed - clear assignment after this time
-            # We'll handle this by checking if there's a later assignment
-            pass
+            bus_assigned_blocks[bus_vin][time] = None
+        elif event_type == 'journey_end' and block_id:
+            # Fallback clear to avoid stale assignment if block_completed is missing.
+            bus_assigned_blocks[bus_vin][time] = None
     
     # Generate timeline points (every 5 minutes)
     while current_time <= sim_end_time:

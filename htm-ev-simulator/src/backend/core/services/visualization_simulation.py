@@ -21,6 +21,8 @@ from ..models.planning.journey import Journey
 from ..models.planning.point_in_sequence import PointInSequence
 from ..models.transport.bus.bus import Bus, BusState
 from ..models.world import World
+from .strategies.base import StrategyRuntimeState
+from .strategies.loader import build_enabled_strategies, run_after_journey, run_before_journey
 
 
 @dataclass(slots=True)
@@ -81,6 +83,25 @@ class VisualizationSimulationService:
     charging_target_soc_percent: float = 85.0
     default_charger_power_kw: float = 282.0
     charging_step_seconds: int = 300
+    enable_precheck_replacement_strategy: bool = False
+    enable_opportunity_charging_strategy: bool = False
+    opportunity_charging_soc_threshold_percent: float = 80.0
+    opportunity_charging_min_gap_seconds: int = 1800
+    strategy_flags: dict[str, bool] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """
+        Normalize strategy flag aliases into unified dynamic strategy flags.
+
+        Rationale: preserve backward compatibility with existing config fields
+        while enabling pluggable strategy discovery without editing this service.
+        """
+        merged = {
+            "precheck_replacement": self.enable_precheck_replacement_strategy,
+            "opportunity_charging": self.enable_opportunity_charging_strategy,
+        }
+        merged.update(self.strategy_flags or {})
+        self.strategy_flags = merged
 
     def run(self, world: World) -> VisualizationSimulationResult:
         buses = sorted(world.buses_by_vehicle_number.values(), key=lambda b: b.vehicle_number)
@@ -91,8 +112,11 @@ class VisualizationSimulationService:
 
         logger = ClassifiedLogger()
         completed_journeys: set[Journey] = set()
+        skipped_journeys: set[Journey] = set()
         skipped_blocks: set[Block] = set()
         current_time = 0.0
+        bus_available_at: dict[str, float] = {b.vin_number: 0.0 for b in buses}
+        strategies = build_enabled_strategies(self.strategy_flags)
 
         if not buses or not blocks:
             return VisualizationSimulationResult(
@@ -100,6 +124,7 @@ class VisualizationSimulationService:
                 classified_logger=logger,
                 current_time=current_time,
                 completed_journeys=completed_journeys,
+                skipped_journeys=skipped_journeys,
                 skipped_blocks=skipped_blocks,
             )
 
@@ -108,8 +133,8 @@ class VisualizationSimulationService:
                 skipped_blocks.add(block)
                 continue
 
-            bus = buses[idx % len(buses)]
             assign_time = block.journeys[0].first_departure_datetime.timestamp()
+            bus = self._select_bus_for_time(buses, bus_available_at, assign_time)
             block_end_time = assign_time
             logger.planning_log.append(
                 {
@@ -121,22 +146,51 @@ class VisualizationSimulationService:
                 }
             )
 
-            for journey in block.journeys:
-                self._simulate_journey(bus, block, journey, logger, completed_journeys)
-                journey_end = journey.points[-1].arrival_datetime.timestamp() if journey.points else assign_time
+            active_bus = bus
+            for journey_index, journey in enumerate(block.journeys):
+                state = StrategyRuntimeState(
+                    world=world,
+                    block=block,
+                    journey=journey,
+                    journey_index=journey_index,
+                    assign_time=assign_time,
+                    active_bus=active_bus,
+                    buses=buses,
+                    bus_available_at=bus_available_at,
+                    logger=logger,
+                )
+                run_before_journey(strategies, self, state)
+                active_bus = state.active_bus
+
+                journey_end, journey_skipped = self._simulate_journey(
+                    active_bus,
+                    block,
+                    journey,
+                    logger,
+                    completed_journeys,
+                )
                 block_end_time = max(block_end_time, journey_end)
+                if journey_skipped:
+                    skipped_journeys.add(journey)
+                    skipped_blocks.add(block)
+                    break
+                state.journey_end = journey_end
+                state.journey_skipped = journey_skipped
+                run_after_journey(strategies, self, state)
+                active_bus = state.active_bus
 
             logger.planning_log.append(
                 {
                     "event": "block_completed",
                     "time": block_end_time,
                     "block_id": block.block_id,
-                    "bus_vin": bus.vin_number,
-                    "bus_number": bus.vehicle_number,
+                    "bus_vin": active_bus.vin_number,
+                    "bus_number": active_bus.vehicle_number,
                 }
             )
 
-            self._maybe_charge(bus, block_end_time, logger)
+            self._maybe_charge(active_bus, block_end_time, logger, strategy_name="SOC_THRESHOLD")
+            bus_available_at[active_bus.vin_number] = logger.laadinfra_log[-1]["time"] if logger.laadinfra_log else block_end_time
             current_time = max(current_time, block_end_time)
             current_time = max(current_time, logger.laadinfra_log[-1]["time"] if logger.laadinfra_log else current_time)
 
@@ -145,6 +199,7 @@ class VisualizationSimulationService:
             classified_logger=logger,
             current_time=current_time,
             completed_journeys=completed_journeys,
+            skipped_journeys=skipped_journeys,
             skipped_blocks=skipped_blocks,
         )
 
@@ -155,9 +210,9 @@ class VisualizationSimulationService:
         journey: Journey,
         logger: ClassifiedLogger,
         completed_journeys: set[Journey],
-    ) -> None:
+    ) -> tuple[float, bool]:
         if not journey.points:
-            return
+            return 0.0, False
 
         first_point = journey.points[0]
         start_ts = first_point.departure_datetime.timestamp()
@@ -236,7 +291,7 @@ class VisualizationSimulationService:
                     for e in logger.planning_log
                 )
                 if already_marked_low_soc:
-                    continue
+                    return arrival_ts, True
                 logger.planning_log.append(
                     {
                         "event": "journey_skipped_low_soc",
@@ -249,6 +304,20 @@ class VisualizationSimulationService:
                         "reason": f"SOC below threshold {self.low_soc_alert_threshold_percent:.1f}%",
                     }
                 )
+                # Stop the journey immediately when low-SOC skip is triggered.
+                bus.state = BusState.AVAILABLE
+                logger.bus_log.append(
+                    {
+                        "event": "state_update",
+                        "time": arrival_ts,
+                        "bus_vin": bus.vin_number,
+                        "bus_number": bus.vehicle_number,
+                        "state": bus.state.value,
+                        "soc_percent": bus.soc_percent,
+                        "location": self._point_to_location(point),
+                    }
+                )
+                return arrival_ts, True
 
         end_ts = journey.points[-1].arrival_datetime.timestamp()
         logger.planning_log.append(
@@ -274,11 +343,22 @@ class VisualizationSimulationService:
                 "location": self._point_to_location(journey.points[-1]),
             }
         )
+        return end_ts, False
 
-    def _maybe_charge(self, bus: Bus, start_time_ts: float, logger: ClassifiedLogger) -> None:
+    def _maybe_charge(
+        self,
+        bus: Bus,
+        start_time_ts: float,
+        logger: ClassifiedLogger,
+        *,
+        strategy_name: str = "SOC_THRESHOLD",
+        deadline_time_ts: float | None = None,
+        target_soc_percent: float | None = None,
+    ) -> None:
         if bus.location is None or bus.location.charging_location is None:
             return
-        if bus.soc_percent >= self.charging_target_soc_percent:
+        effective_target_soc = self.charging_target_soc_percent if target_soc_percent is None else target_soc_percent
+        if bus.soc_percent >= effective_target_soc:
             return
 
         location = bus.location.charging_location
@@ -297,6 +377,134 @@ class VisualizationSimulationService:
             }
         )
 
+    @staticmethod
+    def _select_bus_for_time(
+        buses: list[Bus],
+        bus_available_at: dict[str, float],
+        target_time: float,
+        exclude_vin: str | None = None,
+        required_vehicle_type: str | None = None,
+    ) -> Bus:
+        candidates = [b for b in buses if b.vin_number != exclude_vin]
+        if required_vehicle_type:
+            typed_candidates = [b for b in candidates if b.vehicle_type == required_vehicle_type]
+            if typed_candidates:
+                candidates = typed_candidates
+        if not candidates:
+            return buses[0]
+        available = [b for b in candidates if bus_available_at.get(b.vin_number, 0.0) <= target_time]
+        if available:
+            return sorted(available, key=lambda b: (-b.soc_percent, b.vehicle_number))[0]
+        return sorted(candidates, key=lambda b: (bus_available_at.get(b.vin_number, 0.0), b.vehicle_number))[0]
+
+    def _can_complete_journey(self, bus: Bus, journey: Journey) -> bool:
+        required_kwh = 0.0
+        for point in journey.points:
+            if point.distance_to_next_m:
+                required_kwh += (point.distance_to_next_m / 1000.0) * bus.energy_consumption_per_km
+        required_soc_percent = (required_kwh / bus.battery_capacity_kwh) * 100.0 if bus.battery_capacity_kwh > 0 else 100.0
+        projected_soc = bus.soc_percent - required_soc_percent
+        return projected_soc >= self.low_soc_alert_threshold_percent
+
+    def _log_precheck_replacement(
+        self,
+        *,
+        world: World,
+        logger: ClassifiedLogger,
+        block: Block,
+        original_bus: Bus,
+        replacement_bus: Bus,
+        journey: Journey,
+        sequence: int,
+    ) -> None:
+        start_ts = journey.points[0].departure_datetime.timestamp() if journey.points else 0.0
+        return_journey_id = f"8{sequence:06d}_{block.operating_day.isoformat()}"
+        dispatch_journey_id = f"9{sequence:06d}_{block.operating_day.isoformat()}"
+        garage_point = self._find_point_by_id(world, "30002")
+        fallback_point = journey.points[0] if journey.points else original_bus.location
+        target_point = fallback_point
+        if not garage_point:
+            garage_point = fallback_point
+        # Return trip log (8xxxxxx)
+        logger.planning_log.append(
+            {
+                "event": "return_journey_created",
+                "time": start_ts - 1,
+                "block_id": block.block_id,
+                "return_journey_id": return_journey_id,
+                "original_journey_id": journey.journey_id,
+                "bus_vin": original_bus.vin_number,
+                "bus_number": original_bus.vehicle_number,
+                "reason": "Precheck SOC insufficient for next journey",
+            }
+        )
+        logger.planning_log.append(
+            {
+                "event": "journey_replacement",
+                "time": start_ts,
+                "block_id": block.block_id,
+                "journey_id": journey.journey_id,
+                "bus_vin": original_bus.vin_number,
+                "bus_number": original_bus.vehicle_number,
+                "replacement_bus_vin": replacement_bus.vin_number,
+                "replacement_bus_number": replacement_bus.vehicle_number,
+                "reason": "Precheck SOC insufficient; replacement dispatched",
+            }
+        )
+        logger.planning_log.append(
+            {
+                "event": "block_end_return_journey_created",
+                "time": start_ts,
+                "block_id": block.block_id,
+                "return_journey_id": return_journey_id,
+                "bus_vin": original_bus.vin_number,
+                "bus_number": original_bus.vehicle_number,
+                "reason": "Return to Garage Telexstraat (30002) for charging",
+            }
+        )
+        # Dispatch trip log (9xxxxxx)
+        logger.planning_log.append(
+            {
+                "event": "journey_start",
+                "time": max(0.0, start_ts - 600),
+                "block_id": block.block_id,
+                "journey_id": dispatch_journey_id,
+                "bus_vin": replacement_bus.vin_number,
+                "bus_number": replacement_bus.vehicle_number,
+            }
+        )
+        logger.planning_log.append(
+            {
+                "event": "point_arrival",
+                "time": start_ts,
+                "block_id": block.block_id,
+                "journey_id": dispatch_journey_id,
+                "point_id": target_point.point_id if target_point else "N/A",
+                "point_name": target_point.name if target_point else "Dispatch Target",
+                "bus_vin": replacement_bus.vin_number,
+                "bus_number": replacement_bus.vehicle_number,
+            }
+        )
+        logger.planning_log.append(
+            {
+                "event": "journey_end",
+                "time": start_ts,
+                "block_id": block.block_id,
+                "journey_id": dispatch_journey_id,
+                "bus_vin": replacement_bus.vin_number,
+                "bus_number": replacement_bus.vehicle_number,
+            }
+        )
+
+    @staticmethod
+    def _find_point_by_id(world: World, point_id: str) -> PointInSequence | None:
+        for block in world.blocks_by_id.values():
+            for journey in block.journeys:
+                for point in journey.points:
+                    if str(point.point_id) == str(point_id):
+                        return point
+        return None
+
         logger.laadinfra_log.append(
             {
                 "event": "charging_started",
@@ -307,15 +515,17 @@ class VisualizationSimulationService:
                 "charger_id": charger_id,
                 "connector_id": connector_id,
                 "soc_percent": bus.soc_percent,
-                "target_soc": self.charging_target_soc_percent,
-                "strategy_name": "SOC_THRESHOLD",
+                "target_soc": effective_target_soc,
+                "strategy_name": strategy_name,
                 "power_kw": 0.0,
                 "location_total_power_kw": 0.0,
             }
         )
 
         current_time = start_time_ts
-        while bus.soc_percent < self.charging_target_soc_percent:
+        while bus.soc_percent < effective_target_soc:
+            if deadline_time_ts is not None and current_time + self.charging_step_seconds > deadline_time_ts:
+                break
             actual_power_kw = bus.calculate_actual_charging_power_kw(offered_power_kw)
             delta_kwh = actual_power_kw * (self.charging_step_seconds / 3600.0)
             bus.update_soc(delta_kwh)
@@ -333,7 +543,7 @@ class VisualizationSimulationService:
                     "soc_percent": bus.soc_percent,
                     "power_kw": actual_power_kw,
                     "location_total_power_kw": actual_power_kw,
-                    "strategy_name": "SOC_THRESHOLD",
+                    "strategy_name": strategy_name,
                 }
             )
             logger.bus_log.append(

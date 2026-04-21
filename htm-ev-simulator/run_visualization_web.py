@@ -121,6 +121,14 @@ def _build_form_page(message: str = "", error: str = "") -> str:
           <input id="charge_step_seconds" name="charge_step_seconds" type="number" value="300" min="30" />
         </div>
       </div>
+      <label>
+        <input type="checkbox" name="enable_precheck_replacement_strategy" />
+        Enable precheck replacement strategy (8xxxxxx return + 9xxxxxx dispatch)
+      </label>
+      <label>
+        <input type="checkbox" name="enable_opportunity_charging_strategy" />
+        Enable opportunity charging (terminal has charger, SOC&lt;80%, gap&gt;30 min)
+      </label>
     </fieldset>
 
     <fieldset>
@@ -231,6 +239,10 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         args.append("--fallback-to-stub")
     if "simulate_all_vehicles" in form:
         args.append("--simulate-all-vehicles")
+    if "enable_precheck_replacement_strategy" in form:
+        args.append("--enable-precheck-replacement-strategy")
+    if "enable_opportunity_charging_strategy" in form:
+        args.append("--enable-opportunity-charging-strategy")
 
     vins = v("omniplus_vins", "")
     if vins:
