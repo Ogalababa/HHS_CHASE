@@ -36,6 +36,8 @@ class BusPlanningParquetProvider(PlanningProviderPort):
     base_path: str = "planning/bus"
     datalake: Optional[DataLakeConfig] = None
     columns: Optional[Iterable[str]] = None
+    simulation_start: Optional[datetime] = None
+    simulation_end: Optional[datetime] = None
 
     def get_blocks(self) -> list[Block]:
         df = load_parquet_range(
@@ -48,7 +50,14 @@ class BusPlanningParquetProvider(PlanningProviderPort):
         if self.columns is not None:
             df = _restrict_columns(df, self.columns)
 
-        return _df_to_blocks(df)
+        blocks = _df_to_blocks(df)
+        if self.simulation_start is not None and self.simulation_end is not None:
+            blocks = _filter_blocks_by_window(
+                blocks,
+                window_start=self.simulation_start,
+                window_end=self.simulation_end,
+            )
+        return blocks
 
 
 def _restrict_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
@@ -180,4 +189,41 @@ def _df_to_blocks(df: pd.DataFrame) -> list[Block]:
 
     # Return blocks sorted by (day, id) for deterministic behavior
     return [b for (_, _), b in sorted(blocks.items(), key=lambda kv: (kv[0][1], kv[0][0]))]
+
+
+def _filter_blocks_by_window(
+    blocks: list[Block],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> list[Block]:
+    """
+    Keep only journeys overlapping with simulation window.
+
+    Rationale: ADLS parquet is loaded per date partition; we must further filter
+    by configured simulation time (including cross-day windows) before running
+    the simulation to avoid irrelevant early/late journeys.
+    """
+    if window_end <= window_start:
+        return []
+    filtered_blocks: list[Block] = []
+    for block in blocks:
+        keep_journeys: list[Journey] = []
+        for journey in block.journeys:
+            j_start = journey.first_departure_datetime
+            j_end = journey.last_arrival_datetime
+            if j_start is None or j_end is None:
+                continue
+            # Keep only journeys that START within configured simulation window.
+            # Rationale: for visualization simulation we should not include
+            # pre-start journeys that only overlap the boundary; they create
+            # empty rows (not simulated) in detailed reports.
+            if j_start < window_start or j_start >= window_end:
+                continue
+            keep_journeys.append(journey)
+        if keep_journeys:
+            block.journeys = keep_journeys
+            block.sort_journeys()
+            filtered_blocks.append(block)
+    return filtered_blocks
 

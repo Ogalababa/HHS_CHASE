@@ -163,9 +163,6 @@ def generate_bus_status_section(
         elif event_type == 'block_completed':
             # Block completed - clear assignment after this time
             bus_assigned_blocks[bus_vin][time] = None
-        elif event_type == 'journey_end' and block_id:
-            # Fallback clear to avoid stale assignment if block_completed is missing.
-            bus_assigned_blocks[bus_vin][time] = None
     
     # Generate timeline points (every 5 minutes)
     while current_time <= sim_end_time:

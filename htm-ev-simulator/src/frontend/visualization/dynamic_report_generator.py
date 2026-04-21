@@ -10,7 +10,7 @@ data into a separate JSON file loaded at runtime.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 import json
@@ -262,6 +262,11 @@ def generate_dynamic_report(
 
     template_path = Path(__file__).parent / "templates" / "combined_report.html"
     template_html = template_path.read_text(encoding="utf-8")
+    simulation_window_text = _build_summary(sim, planning_log, laadinfra_log).get("simulation_stop_time", "N/A")
+    if config is not None:
+        start_dt = datetime.combine(config.sim_date, config.sim_start_time)
+        end_dt = start_dt + timedelta(hours=config.sim_duration_hours)
+        simulation_window_text = f"{start_dt.strftime('%Y-%m-%d %H:%M:%S')} - {end_dt.strftime('%Y-%m-%d %H:%M:%S')}"
 
     dynamic_statistics = '<div id="dyn-statistics-slot"></div>'
     dynamic_summary = '<div id="dyn-summary-slot"></div>'
@@ -381,7 +386,8 @@ def generate_dynamic_report(
 """
 
     html_out = template_html.replace("{{ title }}", title)
-    html_out = html_out.replace("{{ sim_stop_time }}", _build_summary(sim, planning_log, laadinfra_log).get("simulation_stop_time", "N/A"))
+    html_out = html_out.replace("Simulation stopped at:", "Simulation window:")
+    html_out = html_out.replace("{{ sim_stop_time }}", simulation_window_text)
     html_out = html_out.replace("{{ statistics_section }}", dynamic_statistics)
     html_out = html_out.replace("{{ summary_section }}", dynamic_summary)
     html_out = html_out.replace("{{ breakdown_table_body }}", dynamic_breakdown_rows)

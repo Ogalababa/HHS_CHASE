@@ -208,6 +208,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable opportunity charging when terminal has charger, SOC<80%%, and layover exceeds 30 minutes.",
     )
+    parser.add_argument(
+        "--enable-start-full-soc-strategy",
+        action="store_true",
+        help="Set all buses SOC to 100%% at simulation start.",
+    )
 
     parser.add_argument(
         "--report-path",
@@ -231,6 +236,7 @@ def _build_planning_provider(
     *,
     use_real: bool,
     sim_date: date,
+    sim_start_time: time,
     sim_hours: int,
     planning_base_path: str,
     point_ids: list[str],
@@ -238,12 +244,16 @@ def _build_planning_provider(
     if not use_real:
         return StubPlanningProvider(point_ids=point_ids, operating_day=sim_date)
 
+    sim_start_dt = datetime.combine(sim_date, sim_start_time)
+    sim_end_dt = sim_start_dt + timedelta(hours=sim_hours)
     end_date = sim_date + timedelta(days=max(0, int(sim_hours / 24)))
     return BusPlanningParquetProvider(
         start_date=sim_date,
         end_date=end_date,
         base_path=planning_base_path,
         datalake=DataLakeConfig(),
+        simulation_start=sim_start_dt,
+        simulation_end=sim_end_dt,
     )
 
 
@@ -293,6 +303,7 @@ def _safe_build_provider_pair(
     use_real_buses: str,
     fallback_to_stub: bool,
     sim_date: date,
+    sim_start_time: time,
     sim_hours: int,
     planning_base_path: str,
     point_ids: list[str],
@@ -306,6 +317,7 @@ def _safe_build_provider_pair(
         planning_provider = _build_planning_provider(
             use_real=use_real_planning,
             sim_date=sim_date,
+            sim_start_time=sim_start_time,
             sim_hours=sim_hours,
             planning_base_path=planning_base_path,
             point_ids=point_ids,
@@ -350,6 +362,7 @@ def main() -> None:
         use_real_buses=args.use_real_buses,
         fallback_to_stub=args.fallback_to_stub,
         sim_date=sim_date,
+        sim_start_time=sim_start_time,
         sim_hours=args.sim_hours,
         planning_base_path=args.planning_base_path,
         point_ids=point_ids,
@@ -369,12 +382,17 @@ def main() -> None:
     world = world_builder.build().world
 
     _stage("Running simulation")
+    sim_start_dt = datetime.combine(sim_date, sim_start_time)
+    sim_end_dt = sim_start_dt + timedelta(hours=args.sim_hours)
     simulation_service = VisualizationSimulationService(
         low_soc_alert_threshold_percent=args.low_soc_threshold,
         charging_target_soc_percent=args.charge_target_soc,
         charging_step_seconds=args.charge_step_seconds,
         enable_precheck_replacement_strategy=args.enable_precheck_replacement_strategy,
         enable_opportunity_charging_strategy=args.enable_opportunity_charging_strategy,
+        enable_start_full_soc_strategy=args.enable_start_full_soc_strategy,
+        simulation_start_timestamp=sim_start_dt.timestamp(),
+        simulation_end_timestamp=sim_end_dt.timestamp(),
     )
     simulation = simulation_service.run(world)
     config = DemoSimulationConfig(

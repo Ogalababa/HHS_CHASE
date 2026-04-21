@@ -1007,7 +1007,27 @@ def generate_breakdown_table_body(
         # Block row (expandable)
         # Use original_block_id for display if available (for cleaner display in multi-day simulations)
         display_block_id = getattr(block, 'original_block_id', block_id) if block else block_id
-        block_status = " ⚠️ SKIPPED" if block_skipped else ""
+        # Aggregate block-level status labels for quick scanning in top-level row.
+        has_replacement = any(
+            (block_id, jid) in journey_replacement_map
+            for jid, _ in sorted_journeys
+        )
+        has_journey_skipped = any(j.get('skipped', False) for _, j in sorted_journeys)
+        has_not_started = any(
+            (j.get('journey_end_time') is None) and (not j.get('skipped', False))
+            for _, j in sorted_journeys
+        )
+        block_labels: list[str] = []
+        if block_skipped or has_journey_skipped:
+            block_labels.append("SKIPPED")
+        if has_replacement:
+            block_labels.append("REPLACEMENT")
+        if has_not_started:
+            block_labels.append("NOT_STARTED")
+        block_status = ""
+        if block_labels:
+            labels_str = " | ".join(block_labels)
+            block_status = f" <span style=\"color:#b02a37; font-weight:600;\">[{labels_str}]</span>"
         html_rows.append(f"""
         <tr class="block-row" id="block-{block_id_safe}">
             <td class="toggle" onclick="toggleVisibility('block-{block_id_safe}')">

@@ -51,24 +51,99 @@ def _build_form_page(message: str = "", error: str = "") -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Simulation Configurator</title>
   <style>
-    body {{ font-family: Arial, sans-serif; max-width: 820px; margin: 24px auto; padding: 0 12px; }}
-    h1 {{ margin-bottom: 8px; }}
-    .hint {{ color: #444; margin-bottom: 16px; }}
-    fieldset {{ border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; }}
-    legend {{ padding: 0 8px; }}
-    label {{ display: block; margin: 8px 0 4px; }}
-    input, select {{ width: 100%; padding: 8px; box-sizing: border-box; }}
-    .row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }}
-    .row3 {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }}
-    .actions {{ margin-top: 16px; }}
-    button {{ padding: 10px 16px; cursor: pointer; }}
+    :root {{
+      --bg: #f8f9fa;
+      --card-bg: #ffffff;
+      --text: #212529;
+      --border: #dee2e6;
+      --accent: #007bff;
+      --accent-hover: #0056b3;
+      --header-bg: #343a40;
+      --header-text: #ffffff;
+    }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }}
+    .page {{
+      max-width: 980px;
+      margin: 20px auto;
+      padding: 0 16px 20px;
+    }}
+    .page-header {{
+      background: var(--header-bg);
+      color: var(--header-text);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+    }}
+    h1 {{ margin: 0; font-size: 1.4rem; }}
+    .hint {{ margin-top: 8px; margin-bottom: 0; color: #cfd4da; }}
+    form {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }}
+    fieldset {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      margin: 12px 0;
+      background: #fcfcfd;
+    }}
+    legend {{
+      padding: 0 8px;
+      font-weight: 600;
+      color: #495057;
+    }}
+    label {{ display: block; margin: 10px 0 4px; font-size: 0.95rem; }}
+    input, select {{
+      width: 100%;
+      padding: 9px 10px;
+      box-sizing: border-box;
+      border: 1px solid #ced4da;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+    }}
+    input:focus, select:focus {{
+      outline: none;
+      border-color: #86b7fe;
+      box-shadow: 0 0 0 0.18rem rgba(13, 110, 253, 0.15);
+    }}
+    input[type="checkbox"] {{
+      width: auto;
+      margin-right: 8px;
+      transform: translateY(1px);
+    }}
+    .row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+    .row3 {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }}
+    .actions {{ margin-top: 18px; }}
+    button {{
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-weight: 600;
+      cursor: pointer;
+    }}
+    button:hover {{ background: var(--accent-hover); }}
     .msg {{ background: #e7f5ff; border: 1px solid #b3e5fc; padding: 10px; border-radius: 6px; margin: 10px 0; }}
     .err {{ background: #ffebee; border: 1px solid #ffcdd2; padding: 10px; border-radius: 6px; margin: 10px 0; color: #b71c1c; white-space: pre-wrap; }}
   </style>
 </head>
 <body>
-  <h1>Simulation Configurator</h1>
-  <p class="hint">Configure mode and parameters, run simulation, then open visualization report automatically.</p>
+  <div class="page">
+  <div class="page-header">
+    <h1>Simulation Configurator</h1>
+    <p class="hint">Configure mode and parameters, run simulation, then open visualization report automatically.</p>
+  </div>
   {"<div class='msg'>" + safe_message + "</div>" if safe_message else ""}
   {"<div class='err'>" + safe_error + "</div>" if safe_error else ""}
 
@@ -129,6 +204,10 @@ def _build_form_page(message: str = "", error: str = "") -> str:
         <input type="checkbox" name="enable_opportunity_charging_strategy" />
         Enable opportunity charging (terminal has charger, SOC&lt;80%, gap&gt;30 min)
       </label>
+      <label>
+        <input type="checkbox" name="enable_start_full_soc_strategy" />
+        Enable full SOC start strategy (set all buses SOC=100% at simulation start)
+      </label>
     </fieldset>
 
     <fieldset>
@@ -143,6 +222,7 @@ def _build_form_page(message: str = "", error: str = "") -> str:
       <button type="submit">Run Simulation</button>
     </div>
   </form>
+  </div>
 </body>
 </html>"""
 
@@ -243,6 +323,8 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         args.append("--enable-precheck-replacement-strategy")
     if "enable_opportunity_charging_strategy" in form:
         args.append("--enable-opportunity-charging-strategy")
+    if "enable_start_full_soc_strategy" in form:
+        args.append("--enable-start-full-soc-strategy")
 
     vins = v("omniplus_vins", "")
     if vins:

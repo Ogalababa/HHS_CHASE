@@ -12,7 +12,7 @@ different data providers in hexagonal architecture.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from ..models.laad_infra.location import Location
@@ -85,9 +85,13 @@ class VisualizationSimulationService:
     charging_step_seconds: int = 300
     enable_precheck_replacement_strategy: bool = False
     enable_opportunity_charging_strategy: bool = False
+    enable_start_full_soc_strategy: bool = False
     opportunity_charging_soc_threshold_percent: float = 80.0
     opportunity_charging_min_gap_seconds: int = 1800
     strategy_flags: dict[str, bool] = field(default_factory=dict)
+    simulation_start_timestamp: float | None = None
+    simulation_end_timestamp: float | None = None
+    _garage_point: PointInSequence | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """
@@ -99,13 +103,14 @@ class VisualizationSimulationService:
         merged = {
             "precheck_replacement": self.enable_precheck_replacement_strategy,
             "opportunity_charging": self.enable_opportunity_charging_strategy,
+            "start_full_soc": self.enable_start_full_soc_strategy,
         }
         merged.update(self.strategy_flags or {})
         self.strategy_flags = merged
 
     def run(self, world: World) -> VisualizationSimulationResult:
         buses = sorted(world.buses_by_vehicle_number.values(), key=lambda b: b.vehicle_number)
-        blocks = sorted(
+        all_blocks = sorted(
             world.blocks_by_id.values(),
             key=lambda blk: blk.journeys[0].first_departure_datetime if blk.journeys else datetime.min,
         )
@@ -114,9 +119,29 @@ class VisualizationSimulationService:
         completed_journeys: set[Journey] = set()
         skipped_journeys: set[Journey] = set()
         skipped_blocks: set[Block] = set()
-        current_time = 0.0
-        bus_available_at: dict[str, float] = {b.vin_number: 0.0 for b in buses}
+        start_ts = self.simulation_start_timestamp
+        end_ts = self.simulation_end_timestamp
+        if start_ts is None and all_blocks:
+            first_block = next((b for b in all_blocks if b.journeys and b.journeys[0].first_departure_datetime), None)
+            start_ts = first_block.journeys[0].first_departure_datetime.timestamp() if first_block else 0.0
+        if start_ts is None:
+            start_ts = 0.0
+        current_time = float(start_ts)
+        bus_available_at: dict[str, float] = {b.vin_number: float(start_ts) for b in buses}
         strategies = build_enabled_strategies(self.strategy_flags)
+        self._garage_point = self._find_point_by_id(world, "30002")
+        if self._garage_point is None:
+            self._garage_point = self._build_virtual_garage_point(world)
+        blocks = []
+        for block in all_blocks:
+            if not block.journeys or not block.journeys[0].first_departure_datetime:
+                continue
+            block_start = block.journeys[0].first_departure_datetime.timestamp()
+            if block_start < float(start_ts):
+                continue
+            if end_ts is not None and block_start >= float(end_ts):
+                continue
+            blocks.append(block)
 
         if not buses or not blocks:
             return VisualizationSimulationResult(
@@ -128,12 +153,29 @@ class VisualizationSimulationService:
                 skipped_blocks=skipped_blocks,
             )
 
+        garage_point = self._garage_point
+        for bus in buses:
+            bus.state = BusState.AVAILABLE
+            if garage_point is not None:
+                bus.location = garage_point
+            logger.bus_log.append(
+                {
+                    "event": "state_update",
+                    "time": float(start_ts),
+                    "bus_vin": bus.vin_number,
+                    "bus_number": bus.vehicle_number,
+                    "state": bus.state.value,
+                    "soc_percent": bus.soc_percent,
+                    "location": self._point_to_location(bus.location) if bus.location else {"name": "Garage Telexstraat", "point_id": "30002"},
+                }
+            )
+
         for idx, block in enumerate(blocks):
             if not block.journeys:
                 skipped_blocks.add(block)
                 continue
 
-            assign_time = block.journeys[0].first_departure_datetime.timestamp()
+            assign_time = max(float(start_ts), block.journeys[0].first_departure_datetime.timestamp())
             bus = self._select_bus_for_time(buses, bus_available_at, assign_time)
             block_end_time = assign_time
             logger.planning_log.append(
@@ -356,7 +398,9 @@ class VisualizationSimulationService:
         target_soc_percent: float | None = None,
     ) -> None:
         if bus.location is None or bus.location.charging_location is None:
-            return
+            if self._garage_point is None or self._garage_point.charging_location is None:
+                return
+            bus.location = self._garage_point
         effective_target_soc = self.charging_target_soc_percent if target_soc_percent is None else target_soc_percent
         if bus.soc_percent >= effective_target_soc:
             return
@@ -369,6 +413,85 @@ class VisualizationSimulationService:
             {
                 "event": "state_update",
                 "time": start_time_ts,
+                "bus_vin": bus.vin_number,
+                "bus_number": bus.vehicle_number,
+                "state": bus.state.value,
+                "soc_percent": bus.soc_percent,
+                "location": self._point_to_location(bus.location),
+            }
+        )
+
+        logger.laadinfra_log.append(
+            {
+                "event": "charging_started",
+                "time": start_time_ts,
+                "bus_vin": bus.vin_number,
+                "bus_number": bus.vehicle_number,
+                "location_id": location.location_id,
+                "charger_id": charger_id,
+                "connector_id": connector_id,
+                "soc_percent": bus.soc_percent,
+                "target_soc": effective_target_soc,
+                "strategy_name": strategy_name,
+                "power_kw": 0.0,
+                "location_total_power_kw": 0.0,
+            }
+        )
+
+        current_time = start_time_ts
+        while bus.soc_percent < effective_target_soc:
+            if deadline_time_ts is not None and current_time + self.charging_step_seconds > deadline_time_ts:
+                break
+            actual_power_kw = bus.calculate_actual_charging_power_kw(offered_power_kw)
+            delta_kwh = actual_power_kw * (self.charging_step_seconds / 3600.0)
+            bus.update_soc(delta_kwh)
+            current_time += self.charging_step_seconds
+
+            logger.laadinfra_log.append(
+                {
+                    "event": "charging_progress",
+                    "time": current_time,
+                    "bus_vin": bus.vin_number,
+                    "bus_number": bus.vehicle_number,
+                    "location_id": location.location_id,
+                    "charger_id": charger_id,
+                    "connector_id": connector_id,
+                    "soc_percent": bus.soc_percent,
+                    "power_kw": actual_power_kw,
+                    "location_total_power_kw": actual_power_kw,
+                    "strategy_name": strategy_name,
+                }
+            )
+            logger.bus_log.append(
+                {
+                    "event": "soc_update",
+                    "time": current_time,
+                    "bus_vin": bus.vin_number,
+                    "bus_number": bus.vehicle_number,
+                    "soc_percent": bus.soc_percent,
+                }
+            )
+
+            if current_time - start_time_ts > 4 * 3600:
+                break
+
+        logger.laadinfra_log.append(
+            {
+                "event": "charging_stopped",
+                "time": current_time,
+                "bus_vin": bus.vin_number,
+                "bus_number": bus.vehicle_number,
+                "location_id": location.location_id,
+                "charger_id": charger_id,
+                "connector_id": connector_id,
+                "soc_percent": bus.soc_percent,
+            }
+        )
+        bus.state = BusState.AVAILABLE
+        logger.bus_log.append(
+            {
+                "event": "state_update",
+                "time": current_time,
                 "bus_vin": bus.vin_number,
                 "bus_number": bus.vehicle_number,
                 "state": bus.state.value,
@@ -505,84 +628,37 @@ class VisualizationSimulationService:
                         return point
         return None
 
-        logger.laadinfra_log.append(
-            {
-                "event": "charging_started",
-                "time": start_time_ts,
-                "bus_vin": bus.vin_number,
-                "bus_number": bus.vehicle_number,
-                "location_id": location.location_id,
-                "charger_id": charger_id,
-                "connector_id": connector_id,
-                "soc_percent": bus.soc_percent,
-                "target_soc": effective_target_soc,
-                "strategy_name": strategy_name,
-                "power_kw": 0.0,
-                "location_total_power_kw": 0.0,
-            }
-        )
+    @staticmethod
+    def _build_virtual_garage_point(world: World) -> PointInSequence | None:
+        """
+        Build a synthetic planning point for garage charger fallback.
 
-        current_time = start_time_ts
-        while bus.soc_percent < effective_target_soc:
-            if deadline_time_ts is not None and current_time + self.charging_step_seconds > deadline_time_ts:
+        Rationale: Some simulation windows may not include any planning points
+        with charger linkage. To keep charging simulation realistic and produce
+        laadinfra logs, we create a virtual Telexstraat point from infra data.
+        """
+        garage_location = None
+        for loc in world.locations_by_id.values():
+            if str(getattr(loc, "point_id", "")) == "30002":
+                garage_location = loc
                 break
-            actual_power_kw = bus.calculate_actual_charging_power_kw(offered_power_kw)
-            delta_kwh = actual_power_kw * (self.charging_step_seconds / 3600.0)
-            bus.update_soc(delta_kwh)
-            current_time += self.charging_step_seconds
-
-            logger.laadinfra_log.append(
-                {
-                    "event": "charging_progress",
-                    "time": current_time,
-                    "bus_vin": bus.vin_number,
-                    "bus_number": bus.vehicle_number,
-                    "location_id": location.location_id,
-                    "charger_id": charger_id,
-                    "connector_id": connector_id,
-                    "soc_percent": bus.soc_percent,
-                    "power_kw": actual_power_kw,
-                    "location_total_power_kw": actual_power_kw,
-                    "strategy_name": strategy_name,
-                }
-            )
-            logger.bus_log.append(
-                {
-                    "event": "soc_update",
-                    "time": current_time,
-                    "bus_vin": bus.vin_number,
-                    "bus_number": bus.vehicle_number,
-                    "soc_percent": bus.soc_percent,
-                }
-            )
-
-            if current_time - start_time_ts > 4 * 3600:
-                break
-
-        logger.laadinfra_log.append(
-            {
-                "event": "charging_stopped",
-                "time": current_time,
-                "bus_vin": bus.vin_number,
-                "bus_number": bus.vehicle_number,
-                "location_id": location.location_id,
-                "charger_id": charger_id,
-                "connector_id": connector_id,
-                "soc_percent": bus.soc_percent,
-            }
+        if garage_location is None:
+            return None
+        now = datetime.combine(date.today(), datetime.min.time())
+        point = PointInSequence(
+            point_id="30002",
+            name="Garage Telexstraat",
+            sequence_order=1,
+            latitude=0.0,
+            longitude=0.0,
+            distance_to_next_m=0.0,
+            arrival_datetime=now,
+            departure_datetime=now,
+            wait_time=timedelta(0),
+            is_wait_point=True,
         )
-        bus.state = BusState.AVAILABLE
-        logger.bus_log.append(
-            {
-                "event": "state_update",
-                "time": current_time,
-                "bus_vin": bus.vin_number,
-                "bus_number": bus.vehicle_number,
-                "state": bus.state.value,
-                "soc_percent": bus.soc_percent,
-                "location": self._point_to_location(bus.location),
-            }
-        )
+        point.charging_location = garage_location
+        return point
 
     @staticmethod
     def _select_connector(location: Location) -> tuple[str, str, float]:
