@@ -27,6 +27,7 @@ class OmniplusBusProvider(BusProviderPort):
 
     client: OmniplusOnClient
     vins: list[str]
+    vin_to_vehicle_number: Optional[dict[str, int]] = None
 
     def get_buses(self) -> list[Bus]:
         raw_by_vin = self.client.get_latest_signals(self.vins)
@@ -34,6 +35,9 @@ class OmniplusBusProvider(BusProviderPort):
 
         for idx, vin in enumerate(self.vins, start=1):
             raw = raw_by_vin.get(vin, {"vin": vin})
+            vehicle_number = idx
+            if self.vin_to_vehicle_number:
+                vehicle_number = int(self.vin_to_vehicle_number.get(str(vin), idx))
 
             # These keys must match your SIGNAL_ID_TO_NAME mapping.
             soc_disp_cval = _to_float(raw.get("SOCdispCval"))
@@ -43,7 +47,7 @@ class OmniplusBusProvider(BusProviderPort):
 
             # Domain Bus requires either explicit capacity or enough fields to infer it.
             bus = Bus(
-                vehicle_number=idx,
+                vehicle_number=vehicle_number,
                 vin_number=str(vin),
                 vehicle_type=str(raw.get("VehicleType", "E-BUS")),
                 state=BusState.AVAILABLE,

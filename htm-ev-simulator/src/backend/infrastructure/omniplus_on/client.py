@@ -18,6 +18,7 @@ from typing import Optional
 import requests
 from requests import Session
 
+from ..env_loader import get_env
 from .constants import SIGNAL_ID_TO_NAME, SIGNAL_IDS_DEFAULT
 
 DEFAULT_TOKEN_URL = "https://omniplus-on.com/oauth/token"
@@ -56,8 +57,9 @@ class OmniplusOnClient:
         self.timeout = float(timeout)
 
         if config is None:
-            client_id = os.getenv("CLIENT_ID")
-            client_secret = os.getenv("CLIENT_SECRET")
+            # Keep same behavior as ADLS helpers: prefer process env, then `.env`.
+            client_id = os.getenv("CLIENT_ID") or get_env("CLIENT_ID")
+            client_secret = os.getenv("CLIENT_SECRET") or get_env("CLIENT_SECRET")
             if not client_id or not client_secret:
                 raise RuntimeError("Missing CLIENT_ID or CLIENT_SECRET for OMNIplus ON.")
             config = OmniplusAuthConfig(client_id=client_id, client_secret=client_secret)

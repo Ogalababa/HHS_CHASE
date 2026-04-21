@@ -105,7 +105,9 @@ def analyze_planning_statistics(world: "World", config: "SimulationConfig", bus_
                 if block_id:
                     actually_assigned_blocks.add(block_id)
     
-    # Use scheduled times for concurrent blocks calculation
+    # Use scheduled times for concurrent blocks calculation.
+    # Count a block as concurrent whenever its active interval overlaps with
+    # the simulation horizon, then clip start/end to the horizon boundaries.
     for block in world.blocks.values():
         if not block.journeys:
             continue
@@ -120,39 +122,31 @@ def analyze_planning_statistics(world: "World", config: "SimulationConfig", bus_
             # #endregion
             continue
         
-        # Filter out return journeys for block statistics
-        non_return_journeys = [j for j in block.journeys if not is_return_journey(j)]
-        if not non_return_journeys:
-            continue  # Skip blocks that only have return journeys
-        
-        # Block starts when first non-return journey starts (scheduled time)
-        first_journey = non_return_journeys[0]
-        if first_journey.first_departure_datetime:
-            block_start = first_journey.first_departure_datetime
-            if block_start >= sim_start_datetime and block_start < sim_end_datetime:
-                events.append((block_start.timestamp(), 1))
-                # #region agent log
-                was_assigned = block.block_id in actually_assigned_blocks
-                try:
-                    with open(debug_log_path, "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "statistics_generator.py:115", "message": "Block scheduled start event", "data": {"block_id": block.block_id, "block_start": block_start.isoformat(), "first_journey_id": first_journey.journey_id, "was_actually_assigned": was_assigned}, "timestamp": datetime.now().timestamp() * 1000}) + "\n")
-                except: pass
-                # #endregion
-        
-        # Block ends when last non-return journey ends (scheduled time)
-        last_journey = non_return_journeys[-1]
-        if last_journey.points:
-            last_point = last_journey.points[-1]
-            if last_point.arrival_datetime:
-                block_end = last_point.arrival_datetime
-                if block_end >= sim_start_datetime and block_end < sim_end_datetime:
-                    events.append((block_end.timestamp(), -1))
-                    # #region agent log
-                    try:
-                        with open(debug_log_path, "a", encoding="utf-8") as f:
-                            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "statistics_generator.py:125", "message": "Block scheduled end event", "data": {"block_id": block.block_id, "block_end": block_end.isoformat(), "last_journey_id": last_journey.journey_id}, "timestamp": datetime.now().timestamp() * 1000}) + "\n")
-                    except: pass
-                    # #endregion
+        # Build block interval from all journeys that have schedule info.
+        journey_starts = [j.first_departure_datetime for j in block.journeys if j.first_departure_datetime]
+        journey_ends = [
+            j.points[-1].arrival_datetime
+            for j in block.journeys
+            if j.points and j.points[-1].arrival_datetime
+        ]
+        if not journey_starts or not journey_ends:
+            continue
+
+        block_start = min(journey_starts)
+        block_end = max(journey_ends)
+        if block_end <= block_start:
+            continue
+
+        # Clip interval to simulation horizon.
+        effective_start = max(block_start, sim_start_datetime)
+        effective_end = min(block_end, sim_end_datetime)
+
+        # No overlap with horizon: skip.
+        if effective_end <= effective_start:
+            continue
+
+        events.append((effective_start.timestamp(), 1))
+        events.append((effective_end.timestamp(), -1))
     
     # Sort events by time
     events.sort(key=lambda x: x[0])
@@ -188,85 +182,22 @@ def analyze_planning_statistics(world: "World", config: "SimulationConfig", bus_
         # Move to next minute
         current_time += timedelta(minutes=1)
     
-    # Calculate required buses using greedy algorithm
-    # This is a simplified calculation - in reality, we'd need to consider
-    # bus availability, charging time, etc.
-    required_buses = calculate_required_buses(world, config)
+    # Required buses are defined as the peak number of buses that are "running":
+    # includes buses executing tasks and buses still in transit (on road) even if
+    # not actively executing a journey step at that minute.
+    #
+    # Fallback to planning-only estimation if runtime logs are unavailable.
+    required_buses = 0
     
-    # Calculate running buses over time based on block assignments and replacements
-    # NEW LOGIC:
-    # 1. If bus is assigned to block, running bus +1
-    # 2. If there is replacement bus, running bus +1
-    # 3. If replaced bus goes to garage for charging (and is not in any block), running bus -1
-    # 4. When block ends (last journey_end without block_end_return_journey), running bus -1
+    # Calculate running buses over time from bus runtime state timeline.
+    # Rationale: assignment-based estimation can overcount during replacements and
+    # delayed state transitions. Runtime state updates are the source of truth for
+    # "currently running" buses in visualization.
     running_buses_timeline = []
     peak_running_buses = 0
     peak_running_time = None
     
     if planning_log and bus_log:
-        # Build timeline of block assignments and replacements
-        # Track: {block_id: {bus_vin, assign_time, end_time, replacement_bus_vin, replacement_time, original_bus_unassign_time}}
-        block_assignments = {}  # {block_id: {'bus_vin': ..., 'assign_time': ..., 'end_time': ..., 'replacement_bus_vin': ..., 'replacement_time': ..., 'original_bus_unassign_time': ...}}
-        
-        # Track buses that were replaced and sent to garage
-        replaced_buses_to_garage = {}  # {bus_vin: [(unassign_time, block_id), ...]}
-        
-        # Process planning_log to build block assignment timeline
-        for log_entry in planning_log:
-            event_type = log_entry.get('event')
-            time = log_entry.get('time', 0)
-            block_id = log_entry.get('block_id')
-            
-            if event_type == 'block_assigned' and block_id:
-                bus_vin = log_entry.get('bus_vin')
-                if bus_vin:
-                    if block_id not in block_assignments:
-                        block_assignments[block_id] = {}
-                    block_assignments[block_id]['bus_vin'] = bus_vin
-                    block_assignments[block_id]['assign_time'] = time
-                    # Get block end time from world
-                    block = world.blocks.get(block_id)
-                    if block:
-                        non_return_journeys = [j for j in block.journeys if not is_return_journey(j)]
-                        if non_return_journeys:
-                            last_journey = non_return_journeys[-1]
-                            block_end = last_journey.points[-1].arrival_datetime if last_journey.points else None
-                            if block_end:
-                                block_assignments[block_id]['end_time'] = block_end.timestamp()
-            
-            elif event_type == 'journey_replacement' and block_id:
-                replacement_bus_vin = log_entry.get('replacement_bus_vin')
-                original_bus_vin = log_entry.get('bus_vin')
-                if replacement_bus_vin and original_bus_vin and block_id in block_assignments:
-                    block_assignments[block_id]['replacement_bus_vin'] = replacement_bus_vin
-                    block_assignments[block_id]['replacement_time'] = time
-                    block_assignments[block_id]['original_bus_unassign_time'] = time
-                    # Track that original bus was replaced and sent to garage
-                    if original_bus_vin not in replaced_buses_to_garage:
-                        replaced_buses_to_garage[original_bus_vin] = []
-                    replaced_buses_to_garage[original_bus_vin].append((time, block_id))
-            
-            elif event_type == 'journey_end' and block_id:
-                # Check if this is the last journey in the block (block end)
-                block = world.blocks.get(block_id)
-                if block and block_id in block_assignments:
-                    journey_id = log_entry.get('journey_id')
-                    if journey_id:
-                        # Check if this is the last non-return journey
-                        non_return_journeys = [j for j in block.journeys if not is_return_journey(j)]
-                        if non_return_journeys:
-                            last_journey = non_return_journeys[-1]
-                            if str(last_journey.journey_id) == str(journey_id):
-                                # This is the last journey, block ends
-                                # But check if there's a block_end_return_journey
-                                has_block_end_return = any(
-                                    j.journey_type == "BLOCK_END_RETURN_TO_TELEXSTRAAT" 
-                                    for j in block.journeys
-                                )
-                                if not has_block_end_return:
-                                    # Block truly ends here
-                                    block_assignments[block_id]['actual_end_time'] = time
-        
         # Build bus state timeline from bus_log
         bus_state_timeline = {}  # {bus_vin: [(time, state), ...]}
         for log_entry in bus_log:
@@ -284,95 +215,59 @@ def analyze_planning_statistics(world: "World", config: "SimulationConfig", bus_
         # Sort state changes for each bus by time
         for bus_vin in bus_state_timeline:
             bus_state_timeline[bus_vin].sort(key=lambda x: x[0])
+
+        # Collect replacement events so we can account for temporary overlap:
+        # replacement bus starts block continuation while original bus can still
+        # be on-road until it reaches charging/available state.
+        replacement_events = []
+        for log_entry in planning_log:
+            if log_entry.get('event') == 'journey_replacement':
+                replacement_events.append({
+                    'time': log_entry.get('time', 0),
+                    'original_bus_vin': log_entry.get('bus_vin'),
+                })
+        replacement_events.sort(key=lambda x: x['time'])
+
+        def _state_at(vin: str, timestamp: float) -> Optional[str]:
+            changes = bus_state_timeline.get(vin, [])
+            state = None
+            for change_time, value in changes:
+                if change_time <= timestamp:
+                    state = value
+                else:
+                    break
+            return state
         
         # Calculate running buses at each time point (same timeline as concurrent blocks)
         for point in concurrent_blocks_timeline:
             timestamp = point['time']
             concurrent_count = point['count']
-            
-            running_count = 0
-            
-            # Count buses assigned to active blocks
-            active_buses = set()
-            for block_id, assignment in block_assignments.items():
-                assign_time = assignment.get('assign_time', 0)
-                end_time = assignment.get('end_time', float('inf'))
-                actual_end_time = assignment.get('actual_end_time', None)
-                
-                # Use actual_end_time if available, otherwise use scheduled end_time
-                block_end = actual_end_time if actual_end_time is not None else end_time
-                
-                # Check if block is active at this timestamp
-                if assign_time <= timestamp <= block_end:
-                    bus_vin = assignment.get('bus_vin')
-                    replacement_bus_vin = assignment.get('replacement_bus_vin')
-                    replacement_time = assignment.get('replacement_time', float('inf'))
-                    original_bus_unassign_time = assignment.get('original_bus_unassign_time', float('inf'))
-                    
-                    # Determine which bus is active at this timestamp
-                    if replacement_bus_vin and replacement_time <= timestamp:
-                        # Replacement bus is active
-                        active_buses.add(replacement_bus_vin)
-                        
-                        # Original bus: check if it has reached garage and started charging
-                        original_bus_vin = assignment.get('bus_vin')
-                        if original_bus_vin and original_bus_unassign_time <= timestamp:
-                            # Check if original bus has reached garage and started charging
-                            original_bus_state = None
-                            if original_bus_vin in bus_state_timeline:
-                                for change_time, state in bus_state_timeline[original_bus_vin]:
-                                    if change_time <= timestamp:
-                                        original_bus_state = state
-                                    else:
-                                        break
-                            
-                            # If original bus is CHARGING and not in any other block, it's no longer running
-                            if original_bus_state == 'CHARGING':
-                                # Check if original bus is in any other active block
-                                in_other_block = False
-                                for other_block_id, other_assignment in block_assignments.items():
-                                    if other_block_id != block_id:
-                                        other_assign_time = other_assignment.get('assign_time', 0)
-                                        other_end_time = other_assignment.get('end_time', float('inf'))
-                                        other_actual_end_time = other_assignment.get('actual_end_time', None)
-                                        other_block_end = other_actual_end_time if other_actual_end_time is not None else other_end_time
-                                        
-                                        if (other_assignment.get('bus_vin') == original_bus_vin or 
-                                            other_assignment.get('replacement_bus_vin') == original_bus_vin):
-                                            if other_assign_time <= timestamp <= other_block_end:
-                                                in_other_block = True
-                                                break
-                                
-                                if not in_other_block:
-                                    # Original bus is charging and not in any block, don't count it
-                                    pass  # Already not counted
-                            else:
-                                # Original bus is still in transit to garage, still counts as running
-                                active_buses.add(original_bus_vin)
+
+            # Runtime measured running buses from state timeline.
+            runtime_running = 0
+            for _bus_vin, changes in bus_state_timeline.items():
+                current_state = None
+                for change_time, state in changes:
+                    if change_time <= timestamp:
+                        current_state = state
                     else:
-                        # Original bus is still active
-                        if bus_vin:
-                            active_buses.add(bus_vin)
-            
-            running_count = len(active_buses)
-            
-            # #region agent log
-            # Check for the specific time range: 2026-02-02 08:16 to 22:25
-            time_range_start = datetime(2026, 2, 2, 8, 16, 0).timestamp()
-            time_range_end = datetime(2026, 2, 2, 22, 25, 0).timestamp()
-            if concurrent_count > running_count and timestamp >= time_range_start and timestamp <= time_range_end:
-                try:
-                    debug_log_path = ".cursor/debug.log"
-                    with open(debug_log_path, "a", encoding="utf-8") as f:
-                        time_str = datetime.fromtimestamp(timestamp).isoformat()
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "statistics_generator.py:357", "message": "Concurrent blocks > Running buses", "data": {"time": time_str, "concurrent_blocks": concurrent_count, "running_buses": running_count, "diff": concurrent_count - running_count, "active_buses_count": len(active_buses)}, "timestamp": datetime.now().timestamp() * 1000}) + "\n")
-                except Exception as e:
-                    try:
-                        debug_log_path = ".cursor/debug.log"
-                        with open(debug_log_path, "a", encoding="utf-8") as f:
-                            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "statistics_generator.py:357", "message": "Error in logging", "data": {"error": str(e)}, "timestamp": datetime.now().timestamp() * 1000}) + "\n")
-                    except: pass
-            # #endregion
+                        break
+                if current_state == 'RUNNING':
+                    runtime_running += 1
+
+            # Baseline by business definition: each active block requires one bus.
+            baseline_running = concurrent_count
+
+            # Add temporary overlap buses from replacements while original still RUNNING.
+            replacement_overlap = 0
+            for repl in replacement_events:
+                repl_time = repl.get('time', 0)
+                original_vin = repl.get('original_bus_vin')
+                if repl_time and original_vin and repl_time <= timestamp:
+                    if _state_at(original_vin, timestamp) == 'RUNNING':
+                        replacement_overlap += 1
+
+            running_count = max(runtime_running, baseline_running + replacement_overlap)
             
             running_buses_timeline.append({
                 'time': timestamp,
@@ -390,6 +285,11 @@ def analyze_planning_statistics(world: "World", config: "SimulationConfig", bus_
                 'time': point['time'],
                 'count': 0
             })
+
+    if planning_log and bus_log:
+        required_buses = peak_running_buses
+    else:
+        required_buses = calculate_required_buses(world, config)
     
     return {
         'total_blocks': total_blocks,

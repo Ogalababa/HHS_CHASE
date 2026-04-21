@@ -41,9 +41,13 @@ from backend.infrastructure.env_loader import get_env
 from backend.infrastructure.maximo_asset_provider import MaximoAssetProvider, MaximoAssetQuery
 from backend.infrastructure.omniplus_bus_provider import OmniplusBusProvider
 from backend.infrastructure.omniplus_on.client import OmniplusAuthConfig, OmniplusOnClient
-from frontend.visualization.classified_report_generator import (
-    generate_combined_report_from_classified_logs,
-)
+from frontend.visualization.dynamic_report_generator import generate_dynamic_report
+
+
+def _stage(message: str) -> None:
+    """Print structured stage logs for web status page parsing."""
+    safe_message = message.encode("ascii", errors="backslashreplace").decode("ascii")
+    print(f"[STAGE] {safe_message}", flush=True)
 
 
 @dataclass(slots=True)
@@ -174,6 +178,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--use-real-planning", action="store_true", help="Load planning via ADLS parquet adapter.")
     parser.add_argument("--use-real-buses", choices=["stub", "maximo", "omniplus"], default="stub")
+    parser.add_argument(
+        "--simulate-all-vehicles",
+        action="store_true",
+        help="Use all available vehicles for selected provider where possible.",
+    )
     parser.add_argument("--fallback-to-stub", action="store_true", help="Fallback to stub providers on adapter errors.")
 
     parser.add_argument("--planning-base-path", default="planning/bus", help="ADLS base path for planning parquet.")
@@ -235,19 +244,36 @@ def _build_bus_provider(
     assetnum_min: int,
     assetnum_max: int,
     omniplus_vins: list[str],
+    simulate_all_vehicles: bool,
 ) -> BusProviderPort:
     if mode == "stub":
         return StubBusProvider(n_buses=stub_bus_count)
     if mode == "maximo":
+        _stage("Fetching Maximo vehicle data")
         return MaximoBusProvider(
             assets_provider=MaximoAssetProvider(datalake=DataLakeConfig()),
             query=MaximoAssetQuery(assetnum_min=assetnum_min, assetnum_max=assetnum_max),
         )
     if mode == "omniplus":
+        _stage("Fetching Maximo mapping data (wagon nr <-> VIN)")
+        maximo_assets = MaximoAssetProvider(datalake=DataLakeConfig()).load_bus_assets(
+            query=MaximoAssetQuery(assetnum_min=assetnum_min, assetnum_max=assetnum_max)
+        )
+        vin_to_vehicle_number = {
+            str(row["htm_vendor_serialnum"]): int(row["assetnum"])
+            for _, row in maximo_assets.iterrows()
+        }
+        if not omniplus_vins and simulate_all_vehicles:
+            omniplus_vins = list(vin_to_vehicle_number.keys())
         if not omniplus_vins:
-            raise RuntimeError("--omniplus-vins is required when --use-real-buses=omniplus.")
+            raise RuntimeError("--omniplus-vins is required when --use-real-buses=omniplus and all-vehicles is off.")
         client = _load_omniplus_client_from_env()
-        return OmniplusBusProvider(client=client, vins=omniplus_vins)
+        _stage("Fetching OMNIplus ON realtime bus data")
+        return OmniplusBusProvider(
+            client=client,
+            vins=omniplus_vins,
+            vin_to_vehicle_number=vin_to_vehicle_number,
+        )
     raise RuntimeError(f"Unsupported bus provider mode: {mode}")
 
 
@@ -264,6 +290,7 @@ def _safe_build_provider_pair(
     assetnum_min: int,
     assetnum_max: int,
     omniplus_vins: list[str],
+    simulate_all_vehicles: bool,
 ) -> tuple[PlanningProviderPort, BusProviderPort]:
     try:
         planning_provider = _build_planning_provider(
@@ -279,6 +306,7 @@ def _safe_build_provider_pair(
             assetnum_min=assetnum_min,
             assetnum_max=assetnum_max,
             omniplus_vins=omniplus_vins,
+            simulate_all_vehicles=simulate_all_vehicles,
         )
         return planning_provider, bus_provider
     except Exception as exc:
@@ -305,6 +333,7 @@ def main() -> None:
 
     infra = ConnectorJsonInfrastructureProvider(json_path=json_path, power_limits_path=power_limits_path)
     point_ids = sorted({str(loc.point_id) for loc in infra.get_locations() if loc.point_id})
+    _stage("Building data providers")
 
     planning_provider, bus_provider = _safe_build_provider_pair(
         use_real_planning=args.use_real_planning,
@@ -318,8 +347,10 @@ def main() -> None:
         assetnum_min=args.assetnum_min,
         assetnum_max=args.assetnum_max,
         omniplus_vins=omniplus_vins,
+        simulate_all_vehicles=args.simulate_all_vehicles,
     )
 
+    _stage("Building world model")
     world_builder = WorldBuilder(
         planning=planning_provider,
         infrastructure=infra,
@@ -327,6 +358,7 @@ def main() -> None:
     )
     world = world_builder.build().world
 
+    _stage("Running simulation")
     simulation_service = VisualizationSimulationService(
         low_soc_alert_threshold_percent=args.low_soc_threshold,
         charging_target_soc_percent=args.charge_target_soc,
@@ -344,17 +376,20 @@ def main() -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     map_path.parent.mkdir(parents=True, exist_ok=True)
 
-    generate_combined_report_from_classified_logs(
+    _stage("Generating visualization report")
+    generate_dynamic_report(
         sim=simulation,
         output_path=str(report_path),
-        map_output_path=str(map_path),
         title="Visualization Demo Report",
-        locations=simulation.world.locations,
         config=config,
     )
 
+    _stage("Simulation and report generation completed")
     print(f"Report generated: {report_path}")
     print(f"Map placeholder path: {map_path}")
+    print(f"Bus log JSON: {report_path.parent / 'json' / 'bus_log.json'}")
+    print(f"Laadinfra log JSON: {report_path.parent / 'json' / 'laadinfra_log.json'}")
+    print(f"Planning log JSON: {report_path.parent / 'json' / 'planning_log.json'}")
     print(f"Planning provider: {planning_provider.__class__.__name__}")
     print(f"Bus provider: {bus_provider.__class__.__name__}")
 

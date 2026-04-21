@@ -796,6 +796,25 @@ def generate_breakdown_table_body(
                             'distance_to_next_m': point.distance_to_next_m
                         })
     
+    # Normalize block time window from journey windows.
+    # Rationale: event processing order can contain late updates and overwrite
+    # block-level times. Canonical block boundaries are earliest journey start
+    # and latest journey end inside the same block.
+    for _block_id, block_data in blocks_data.items():
+        journey_starts: list[float] = []
+        journey_ends: list[float] = []
+        for _journey_id, journey_data in block_data['journeys'].items():
+            start_time = journey_data.get('journey_start_time')
+            end_time = journey_data.get('journey_end_time')
+            if start_time is not None:
+                journey_starts.append(start_time)
+            if end_time is not None:
+                journey_ends.append(end_time)
+        if journey_starts:
+            block_data['block_start_time'] = min(journey_starts)
+        if journey_ends:
+            block_data['block_end_time'] = max(journey_ends)
+
     # Sort blocks by start time (earliest first)
     sorted_blocks = sorted(
         blocks_data.items(),

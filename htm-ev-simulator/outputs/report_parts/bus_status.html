@@ -1,0 +1,344 @@
+
+    <div class="bus-status-section">
+        <h2>Bus Status Over Time</h2>
+        <p>Total Buses: 4</p>
+        <p>Time interval: 5 minutes</p>
+        
+        <div style="margin: 1rem 0; display: flex; gap: 2rem; align-items: center; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 300px;">
+                <label for="time-slider">Time: </label>
+                <input type="range" id="time-slider" min="0" max="72" value="0" 
+                       style="width: 60%; margin: 0 1rem;">
+                <span id="current-time-display">2026-02-02 06:00</span>
+            </div>
+            <div style="flex: 0 0 auto;">
+                <button id="play-pause-btn" onclick="togglePlayPause()" style="padding: 8px 16px; font-size: 1rem; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px;">
+                    ▶ Play
+                </button>
+            </div>
+        </div>
+        
+        <div id="status-statistics" style="margin: 1rem 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+            <div class="stat-card" style="background-color: #d4edda; padding: 1rem; border-radius: 4px; border: 1px solid #c3e6cb;">
+                <div style="font-size: 0.9rem; color: #155724; margin-bottom: 0.5rem;">Total Running</div>
+                <div id="stat-running" style="font-size: 1.5rem; font-weight: bold; color: #155724;">0</div>
+            </div>
+            <div class="stat-card" style="background-color: #fff3cd; padding: 1rem; border-radius: 4px; border: 1px solid #ffeaa7;">
+                <div style="font-size: 0.9rem; color: #856404; margin-bottom: 0.5rem;">Total Charging</div>
+                <div id="stat-charging" style="font-size: 1.5rem; font-weight: bold; color: #856404;">0</div>
+            </div>
+            <div class="stat-card" style="background-color: #d1ecf1; padding: 1rem; border-radius: 4px; border: 1px solid #bee5eb;">
+                <div style="font-size: 0.9rem; color: #0c5460; margin-bottom: 0.5rem;">Total Available</div>
+                <div id="stat-available" style="font-size: 1.5rem; font-weight: bold; color: #0c5460;">0</div>
+            </div>
+            <div class="stat-card" style="background-color: #f8d7da; padding: 1rem; border-radius: 4px; border: 1px solid #f5c6cb;">
+                <div style="font-size: 0.9rem; color: #721c24; margin-bottom: 0.5rem;">No Status (-)</div>
+                <div id="stat-unknown" style="font-size: 1.5rem; font-weight: bold; color: #721c24;">0</div>
+            </div>
+        </div>
+        
+        <div style="overflow-x: auto; max-height: 80vh; overflow-y: auto;">
+            <table id="bus-status-table" class="bus-status-table">
+                <thead>
+                    <tr>
+                        <th>Bus Nr</th>
+                        <th>Last Charged Connector</th>
+                        <th>Charging Power (kW)</th>
+                        <th>State</th>
+                        <th>SOC (%)</th>
+                        <th>Assigned Block</th>
+                        <th>Location</th>
+                    </tr>
+                </thead>
+                <tbody id="bus-status-tbody">
+
+                    <tr data-bus-vin="VIN-1401">
+                        <td>1401</td>
+                        <td class="connector-cell" data-bus-vin="VIN-1401">-</td>
+                        <td class="power-cell" data-bus-vin="VIN-1401">-</td>
+                        <td class="state-cell" data-bus-vin="VIN-1401">-</td>
+                        <td class="soc-cell" data-bus-vin="VIN-1401">-</td>
+                        <td class="block-cell" data-bus-vin="VIN-1401">-</td>
+                        <td class="location-cell" data-bus-vin="VIN-1401">-</td>
+                    </tr>
+
+                    <tr data-bus-vin="VIN-1402">
+                        <td>1402</td>
+                        <td class="connector-cell" data-bus-vin="VIN-1402">-</td>
+                        <td class="power-cell" data-bus-vin="VIN-1402">-</td>
+                        <td class="state-cell" data-bus-vin="VIN-1402">-</td>
+                        <td class="soc-cell" data-bus-vin="VIN-1402">-</td>
+                        <td class="block-cell" data-bus-vin="VIN-1402">-</td>
+                        <td class="location-cell" data-bus-vin="VIN-1402">-</td>
+                    </tr>
+
+                    <tr data-bus-vin="VIN-1403">
+                        <td>1403</td>
+                        <td class="connector-cell" data-bus-vin="VIN-1403">-</td>
+                        <td class="power-cell" data-bus-vin="VIN-1403">-</td>
+                        <td class="state-cell" data-bus-vin="VIN-1403">-</td>
+                        <td class="soc-cell" data-bus-vin="VIN-1403">-</td>
+                        <td class="block-cell" data-bus-vin="VIN-1403">-</td>
+                        <td class="location-cell" data-bus-vin="VIN-1403">-</td>
+                    </tr>
+
+                    <tr data-bus-vin="VIN-1404">
+                        <td>1404</td>
+                        <td class="connector-cell" data-bus-vin="VIN-1404">-</td>
+                        <td class="power-cell" data-bus-vin="VIN-1404">-</td>
+                        <td class="state-cell" data-bus-vin="VIN-1404">-</td>
+                        <td class="soc-cell" data-bus-vin="VIN-1404">-</td>
+                        <td class="block-cell" data-bus-vin="VIN-1404">-</td>
+                        <td class="location-cell" data-bus-vin="VIN-1404">-</td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        // Bus status data
+        const busStatusData = {
+            timeline: ["2026-02-02 06:00", "2026-02-02 06:05", "2026-02-02 06:10", "2026-02-02 06:15", "2026-02-02 06:20", "2026-02-02 06:25", "2026-02-02 06:30", "2026-02-02 06:35", "2026-02-02 06:40", "2026-02-02 06:45", "2026-02-02 06:50", "2026-02-02 06:55", "2026-02-02 07:00", "2026-02-02 07:05", "2026-02-02 07:10", "2026-02-02 07:15", "2026-02-02 07:20", "2026-02-02 07:25", "2026-02-02 07:30", "2026-02-02 07:35", "2026-02-02 07:40", "2026-02-02 07:45", "2026-02-02 07:50", "2026-02-02 07:55", "2026-02-02 08:00", "2026-02-02 08:05", "2026-02-02 08:10", "2026-02-02 08:15", "2026-02-02 08:20", "2026-02-02 08:25", "2026-02-02 08:30", "2026-02-02 08:35", "2026-02-02 08:40", "2026-02-02 08:45", "2026-02-02 08:50", "2026-02-02 08:55", "2026-02-02 09:00", "2026-02-02 09:05", "2026-02-02 09:10", "2026-02-02 09:15", "2026-02-02 09:20", "2026-02-02 09:25", "2026-02-02 09:30", "2026-02-02 09:35", "2026-02-02 09:40", "2026-02-02 09:45", "2026-02-02 09:50", "2026-02-02 09:55", "2026-02-02 10:00", "2026-02-02 10:05", "2026-02-02 10:10", "2026-02-02 10:15", "2026-02-02 10:20", "2026-02-02 10:25", "2026-02-02 10:30", "2026-02-02 10:35", "2026-02-02 10:40", "2026-02-02 10:45", "2026-02-02 10:50", "2026-02-02 10:55", "2026-02-02 11:00", "2026-02-02 11:05", "2026-02-02 11:10", "2026-02-02 11:15", "2026-02-02 11:20", "2026-02-02 11:25", "2026-02-02 11:30", "2026-02-02 11:35", "2026-02-02 11:40", "2026-02-02 11:45", "2026-02-02 11:50", "2026-02-02 11:55", "2026-02-02 12:00"],
+
+            busStates: {"VIN-1401": {"0": "RUNNING", "1": "RUNNING", "2": "RUNNING", "3": "RUNNING", "4": "RUNNING", "5": "RUNNING", "6": "RUNNING", "7": "RUNNING", "8": "AVAILABLE", "9": "AVAILABLE", "10": "AVAILABLE", "11": "AVAILABLE", "12": "RUNNING", "13": "RUNNING", "14": "RUNNING", "15": "RUNNING", "16": "RUNNING", "17": "RUNNING", "18": "RUNNING", "19": "RUNNING", "20": "CHARGING", "21": "CHARGING", "22": "CHARGING", "23": "CHARGING", "24": "CHARGING", "25": "CHARGING", "26": "CHARGING", "27": "AVAILABLE", "28": "AVAILABLE", "29": "AVAILABLE", "30": "AVAILABLE", "31": "AVAILABLE", "32": "AVAILABLE", "33": "AVAILABLE", "34": "AVAILABLE", "35": "AVAILABLE", "36": "AVAILABLE", "37": "AVAILABLE", "38": "AVAILABLE", "39": "AVAILABLE", "40": "AVAILABLE", "41": "AVAILABLE", "42": "AVAILABLE", "43": "AVAILABLE", "44": "AVAILABLE", "45": "AVAILABLE", "46": "AVAILABLE", "47": "AVAILABLE", "48": "AVAILABLE", "49": "AVAILABLE", "50": "AVAILABLE", "51": "AVAILABLE", "52": "AVAILABLE", "53": "AVAILABLE", "54": "AVAILABLE", "55": "AVAILABLE", "56": "AVAILABLE", "57": "AVAILABLE", "58": "AVAILABLE", "59": "AVAILABLE", "60": "AVAILABLE", "61": "AVAILABLE", "62": "AVAILABLE", "63": "AVAILABLE", "64": "AVAILABLE", "65": "AVAILABLE", "66": "AVAILABLE", "67": "AVAILABLE", "68": "AVAILABLE", "69": "AVAILABLE", "70": "AVAILABLE", "71": "AVAILABLE", "72": "AVAILABLE"}, "VIN-1402": {"24": "RUNNING", "25": "RUNNING", "26": "RUNNING", "27": "RUNNING", "28": "RUNNING", "29": "RUNNING", "30": "RUNNING", "31": "RUNNING", "32": "AVAILABLE", "33": "AVAILABLE", "34": "AVAILABLE", "35": "AVAILABLE", "36": "RUNNING", "37": "RUNNING", "38": "RUNNING", "39": "RUNNING", "40": "RUNNING", "41": "RUNNING", "42": "RUNNING", "43": "RUNNING", "44": "CHARGING", "45": "CHARGING", "46": "CHARGING", "47": "CHARGING", "48": "CHARGING", "49": "CHARGING", "50": "AVAILABLE", "51": "AVAILABLE", "52": "AVAILABLE", "53": "AVAILABLE", "54": "AVAILABLE", "55": "AVAILABLE", "56": "AVAILABLE", "57": "AVAILABLE", "58": "AVAILABLE", "59": "AVAILABLE", "60": "AVAILABLE", "61": "AVAILABLE", "62": "AVAILABLE", "63": "AVAILABLE", "64": "AVAILABLE", "65": "AVAILABLE", "66": "AVAILABLE", "67": "AVAILABLE", "68": "AVAILABLE", "69": "AVAILABLE", "70": "AVAILABLE", "71": "AVAILABLE", "72": "AVAILABLE"}, "VIN-1403": {"48": "RUNNING", "49": "RUNNING", "50": "RUNNING", "51": "RUNNING", "52": "RUNNING", "53": "RUNNING", "54": "RUNNING", "55": "RUNNING", "56": "AVAILABLE", "57": "AVAILABLE", "58": "AVAILABLE", "59": "AVAILABLE", "60": "RUNNING", "61": "RUNNING", "62": "RUNNING", "63": "RUNNING", "64": "RUNNING", "65": "RUNNING", "66": "RUNNING", "67": "RUNNING", "68": "CHARGING", "69": "CHARGING", "70": "CHARGING", "71": "CHARGING", "72": "CHARGING"}},
+
+            busSOC: {"VIN-1401": {"0": 48.86621315192744, "1": 50.0, "2": 50.0, "3": 47.73242630385487, "4": 47.73242630385487, "5": 46.59863945578231, "6": 46.59863945578231, "7": 46.59863945578231, "8": 46.59863945578231, "9": 46.59863945578231, "10": 46.59863945578231, "11": 46.59863945578231, "12": 45.46485260770975, "13": 46.59863945578231, "14": 46.59863945578231, "15": 44.33106575963719, "16": 44.33106575963719, "17": 43.197278911564624, "18": 43.197278911564624, "19": 43.197278911564624, "20": 43.197278911564624, "21": 49.47790529666137, "22": 55.81312518397172, "23": 62.20341312018917, "24": 68.64924777694063, "25": 75.15111198664192, "26": 81.70949277866488, "27": 88.3248814158188, "28": 88.3248814158188, "29": 88.3248814158188, "30": 88.3248814158188, "31": 88.3248814158188, "32": 88.3248814158188, "33": 88.3248814158188, "34": 88.3248814158188, "35": 88.3248814158188, "36": 88.3248814158188, "37": 88.3248814158188, "38": 88.3248814158188, "39": 88.3248814158188, "40": 88.3248814158188, "41": 88.3248814158188, "42": 88.3248814158188, "43": 88.3248814158188, "44": 88.3248814158188, "45": 88.3248814158188, "46": 88.3248814158188, "47": 88.3248814158188, "48": 88.3248814158188, "49": 88.3248814158188, "50": 88.3248814158188, "51": 88.3248814158188, "52": 88.3248814158188, "53": 88.3248814158188, "54": 88.3248814158188, "55": 88.3248814158188, "56": 88.3248814158188, "57": 88.3248814158188, "58": 88.3248814158188, "59": 88.3248814158188, "60": 88.3248814158188, "61": 88.3248814158188, "62": 88.3248814158188, "63": 88.3248814158188, "64": 88.3248814158188, "65": 88.3248814158188, "66": 88.3248814158188, "67": 88.3248814158188, "68": 88.3248814158188, "69": 88.3248814158188, "70": 88.3248814158188, "71": 88.3248814158188, "72": 88.3248814158188}, "VIN-1402": {"24": 53.86621315192745, "25": 55.0, "26": 55.0, "27": 52.732426303854886, "28": 52.732426303854886, "29": 51.598639455782326, "30": 51.598639455782326, "31": 51.598639455782326, "32": 51.598639455782326, "33": 51.598639455782326, "34": 51.598639455782326, "35": 51.598639455782326, "36": 50.464852607709766, "37": 51.598639455782326, "38": 51.598639455782326, "39": 49.3310657596372, "40": 49.3310657596372, "41": 48.19727891156464, "42": 48.19727891156464, "43": 48.19727891156464, "44": 48.19727891156464, "45": 54.52136712583749, "46": 60.900426628443036, "47": 67.33493524992988, "48": 73.82537497432459, "49": 80.3722319752352, "50": 86.9759966522686, "51": 86.9759966522686, "52": 86.9759966522686, "53": 86.9759966522686, "54": 86.9759966522686, "55": 86.9759966522686, "56": 86.9759966522686, "57": 86.9759966522686, "58": 86.9759966522686, "59": 86.9759966522686, "60": 86.9759966522686, "61": 86.9759966522686, "62": 86.9759966522686, "63": 86.9759966522686, "64": 86.9759966522686, "65": 86.9759966522686, "66": 86.9759966522686, "67": 86.9759966522686, "68": 86.9759966522686, "69": 86.9759966522686, "70": 86.9759966522686, "71": 86.9759966522686, "72": 86.9759966522686}, "VIN-1403": {"48": 58.86621315192744, "49": 60.0, "50": 60.0, "51": 57.73242630385488, "52": 57.73242630385488, "53": 56.59863945578232, "54": 56.59863945578232, "55": 56.59863945578232, "56": 56.59863945578232, "57": 56.59863945578232, "58": 56.59863945578232, "59": 56.59863945578232, "60": 55.46485260770976, "61": 56.59863945578232, "62": 56.59863945578232, "63": 54.3310657596372, "64": 54.3310657596372, "65": 53.19727891156464, "66": 53.19727891156464, "67": 53.19727891156464, "68": 53.19727891156464, "69": 59.56482895501362, "70": 65.98772807291434, "71": 72.46645737967057, "72": 79.00150217170851}},
+
+            busBlocks: {"VIN-1401": {"1": "BLOCK_1_2026-02-02", "2": "BLOCK_1_2026-02-02", "3": "BLOCK_1_2026-02-02", "4": "BLOCK_1_2026-02-02", "5": "BLOCK_1_2026-02-02", "6": "BLOCK_1_2026-02-02", "7": "BLOCK_1_2026-02-02", "8": "BLOCK_1_2026-02-02", "9": "BLOCK_1_2026-02-02", "10": "BLOCK_1_2026-02-02", "11": "BLOCK_1_2026-02-02", "12": "BLOCK_1_2026-02-02", "13": "BLOCK_1_2026-02-02", "14": "BLOCK_1_2026-02-02", "15": "BLOCK_1_2026-02-02", "16": "BLOCK_1_2026-02-02", "17": "BLOCK_1_2026-02-02", "18": "BLOCK_1_2026-02-02", "19": "BLOCK_1_2026-02-02", "20": "BLOCK_1_2026-02-02", "21": "BLOCK_1_2026-02-02", "22": "BLOCK_1_2026-02-02", "23": "BLOCK_1_2026-02-02", "24": "BLOCK_1_2026-02-02", "25": "BLOCK_1_2026-02-02", "26": "BLOCK_1_2026-02-02", "27": "BLOCK_1_2026-02-02", "28": "BLOCK_1_2026-02-02", "29": "BLOCK_1_2026-02-02", "30": "BLOCK_1_2026-02-02", "31": "BLOCK_1_2026-02-02", "32": "BLOCK_1_2026-02-02", "33": "BLOCK_1_2026-02-02", "34": "BLOCK_1_2026-02-02", "35": "BLOCK_1_2026-02-02", "36": "BLOCK_1_2026-02-02", "37": "BLOCK_1_2026-02-02", "38": "BLOCK_1_2026-02-02", "39": "BLOCK_1_2026-02-02", "40": "BLOCK_1_2026-02-02", "41": "BLOCK_1_2026-02-02", "42": "BLOCK_1_2026-02-02", "43": "BLOCK_1_2026-02-02", "44": "BLOCK_1_2026-02-02", "45": "BLOCK_1_2026-02-02", "46": "BLOCK_1_2026-02-02", "47": "BLOCK_1_2026-02-02", "48": "BLOCK_1_2026-02-02", "49": "BLOCK_1_2026-02-02", "50": "BLOCK_1_2026-02-02", "51": "BLOCK_1_2026-02-02", "52": "BLOCK_1_2026-02-02", "53": "BLOCK_1_2026-02-02", "54": "BLOCK_1_2026-02-02", "55": "BLOCK_1_2026-02-02", "56": "BLOCK_1_2026-02-02", "57": "BLOCK_1_2026-02-02", "58": "BLOCK_1_2026-02-02", "59": "BLOCK_1_2026-02-02", "60": "BLOCK_1_2026-02-02", "61": "BLOCK_1_2026-02-02", "62": "BLOCK_1_2026-02-02", "63": "BLOCK_1_2026-02-02", "64": "BLOCK_1_2026-02-02", "65": "BLOCK_1_2026-02-02", "66": "BLOCK_1_2026-02-02", "67": "BLOCK_1_2026-02-02", "68": "BLOCK_1_2026-02-02", "69": "BLOCK_1_2026-02-02", "70": "BLOCK_1_2026-02-02", "71": "BLOCK_1_2026-02-02", "72": "BLOCK_1_2026-02-02"}, "VIN-1402": {"25": "BLOCK_2_2026-02-02", "26": "BLOCK_2_2026-02-02", "27": "BLOCK_2_2026-02-02", "28": "BLOCK_2_2026-02-02", "29": "BLOCK_2_2026-02-02", "30": "BLOCK_2_2026-02-02", "31": "BLOCK_2_2026-02-02", "32": "BLOCK_2_2026-02-02", "33": "BLOCK_2_2026-02-02", "34": "BLOCK_2_2026-02-02", "35": "BLOCK_2_2026-02-02", "36": "BLOCK_2_2026-02-02", "37": "BLOCK_2_2026-02-02", "38": "BLOCK_2_2026-02-02", "39": "BLOCK_2_2026-02-02", "40": "BLOCK_2_2026-02-02", "41": "BLOCK_2_2026-02-02", "42": "BLOCK_2_2026-02-02", "43": "BLOCK_2_2026-02-02", "44": "BLOCK_2_2026-02-02", "45": "BLOCK_2_2026-02-02", "46": "BLOCK_2_2026-02-02", "47": "BLOCK_2_2026-02-02", "48": "BLOCK_2_2026-02-02", "49": "BLOCK_2_2026-02-02", "50": "BLOCK_2_2026-02-02", "51": "BLOCK_2_2026-02-02", "52": "BLOCK_2_2026-02-02", "53": "BLOCK_2_2026-02-02", "54": "BLOCK_2_2026-02-02", "55": "BLOCK_2_2026-02-02", "56": "BLOCK_2_2026-02-02", "57": "BLOCK_2_2026-02-02", "58": "BLOCK_2_2026-02-02", "59": "BLOCK_2_2026-02-02", "60": "BLOCK_2_2026-02-02", "61": "BLOCK_2_2026-02-02", "62": "BLOCK_2_2026-02-02", "63": "BLOCK_2_2026-02-02", "64": "BLOCK_2_2026-02-02", "65": "BLOCK_2_2026-02-02", "66": "BLOCK_2_2026-02-02", "67": "BLOCK_2_2026-02-02", "68": "BLOCK_2_2026-02-02", "69": "BLOCK_2_2026-02-02", "70": "BLOCK_2_2026-02-02", "71": "BLOCK_2_2026-02-02", "72": "BLOCK_2_2026-02-02"}, "VIN-1403": {"49": "BLOCK_3_2026-02-02", "50": "BLOCK_3_2026-02-02", "51": "BLOCK_3_2026-02-02", "52": "BLOCK_3_2026-02-02", "53": "BLOCK_3_2026-02-02", "54": "BLOCK_3_2026-02-02", "55": "BLOCK_3_2026-02-02", "56": "BLOCK_3_2026-02-02", "57": "BLOCK_3_2026-02-02", "58": "BLOCK_3_2026-02-02", "59": "BLOCK_3_2026-02-02", "60": "BLOCK_3_2026-02-02", "61": "BLOCK_3_2026-02-02", "62": "BLOCK_3_2026-02-02", "63": "BLOCK_3_2026-02-02", "64": "BLOCK_3_2026-02-02", "65": "BLOCK_3_2026-02-02", "66": "BLOCK_3_2026-02-02", "67": "BLOCK_3_2026-02-02", "68": "BLOCK_3_2026-02-02", "69": "BLOCK_3_2026-02-02", "70": "BLOCK_3_2026-02-02", "71": "BLOCK_3_2026-02-02", "72": "BLOCK_3_2026-02-02"}},
+
+            busLocations: {"VIN-1401": {"0": "Stop 10741", "1": "Stop 10741", "2": "Stop 10741", "3": "Stop 1502", "4": "Stop 1502", "5": "Stop 209", "6": "Stop 209", "7": "Stop 209", "8": "Stop 30002", "9": "Stop 30002", "10": "Stop 30002", "11": "Stop 30002", "12": "Stop 1502", "13": "Stop 1502", "14": "Stop 1502", "15": "Stop 209", "16": "Stop 209", "17": "Stop 30002", "18": "Stop 30002", "19": "Stop 30002", "20": "Stop 10741", "21": "Stop 10741", "22": "Stop 10741", "23": "Stop 10741", "24": "Stop 10741", "25": "Stop 10741", "26": "Stop 10741", "27": "Stop 10741", "28": "Stop 10741", "29": "Stop 10741", "30": "Stop 10741", "31": "Stop 10741", "32": "Stop 10741", "33": "Stop 10741", "34": "Stop 10741", "35": "Stop 10741", "36": "Stop 10741", "37": "Stop 10741", "38": "Stop 10741", "39": "Stop 10741", "40": "Stop 10741", "41": "Stop 10741", "42": "Stop 10741", "43": "Stop 10741", "44": "Stop 10741", "45": "Stop 10741", "46": "Stop 10741", "47": "Stop 10741", "48": "Stop 10741", "49": "Stop 10741", "50": "Stop 10741", "51": "Stop 10741", "52": "Stop 10741", "53": "Stop 10741", "54": "Stop 10741", "55": "Stop 10741", "56": "Stop 10741", "57": "Stop 10741", "58": "Stop 10741", "59": "Stop 10741", "60": "Stop 10741", "61": "Stop 10741", "62": "Stop 10741", "63": "Stop 10741", "64": "Stop 10741", "65": "Stop 10741", "66": "Stop 10741", "67": "Stop 10741", "68": "Stop 10741", "69": "Stop 10741", "70": "Stop 10741", "71": "Stop 10741", "72": "Stop 10741"}, "VIN-1402": {"24": "Stop 1502", "25": "Stop 1502", "26": "Stop 1502", "27": "Stop 209", "28": "Stop 209", "29": "Stop 30002", "30": "Stop 30002", "31": "Stop 30002", "32": "Stop 10741", "33": "Stop 10741", "34": "Stop 10741", "35": "Stop 10741", "36": "Stop 209", "37": "Stop 209", "38": "Stop 209", "39": "Stop 30002", "40": "Stop 30002", "41": "Stop 10741", "42": "Stop 10741", "43": "Stop 10741", "44": "Stop 1502", "45": "Stop 1502", "46": "Stop 1502", "47": "Stop 1502", "48": "Stop 1502", "49": "Stop 1502", "50": "Stop 1502", "51": "Stop 1502", "52": "Stop 1502", "53": "Stop 1502", "54": "Stop 1502", "55": "Stop 1502", "56": "Stop 1502", "57": "Stop 1502", "58": "Stop 1502", "59": "Stop 1502", "60": "Stop 1502", "61": "Stop 1502", "62": "Stop 1502", "63": "Stop 1502", "64": "Stop 1502", "65": "Stop 1502", "66": "Stop 1502", "67": "Stop 1502", "68": "Stop 1502", "69": "Stop 1502", "70": "Stop 1502", "71": "Stop 1502", "72": "Stop 1502"}, "VIN-1403": {"48": "Stop 209", "49": "Stop 209", "50": "Stop 209", "51": "Stop 30002", "52": "Stop 30002", "53": "Stop 10741", "54": "Stop 10741", "55": "Stop 10741", "56": "Stop 1502", "57": "Stop 1502", "58": "Stop 1502", "59": "Stop 1502", "60": "Stop 30002", "61": "Stop 30002", "62": "Stop 30002", "63": "Stop 10741", "64": "Stop 10741", "65": "Stop 1502", "66": "Stop 1502", "67": "Stop 1502", "68": "Stop 209", "69": "Stop 209", "70": "Stop 209", "71": "Stop 209", "72": "Stop 209"}},
+
+            busConnectors: {"VIN-1401": {"20": "HVC29-1", "21": "HVC29-1", "22": "HVC29-1", "23": "HVC29-1", "24": "HVC29-1", "25": "HVC29-1", "26": "HVC29-1"}, "VIN-1402": {"44": "HVC31-1", "45": "HVC31-1", "46": "HVC31-1", "47": "HVC31-1", "48": "HVC31-1", "49": "HVC31-1"}, "VIN-1403": {"68": "HVC37-1", "69": "HVC37-1", "70": "HVC37-1", "71": "HVC37-1", "72": "HVC37-1"}},
+
+            busPowers: {"VIN-1401": {"20": 0.0, "21": 265.89659863945576, "22": 268.20786914917136, "23": 270.53923006770157, "24": 272.8908560282296, "25": 275.2629231819142, "26": 277.6556092110842, "27": 280.0690933425487, "28": 280.0690933425487, "29": 280.0690933425487, "30": 280.0690933425487, "31": 280.0690933425487, "32": 280.0690933425487, "33": 280.0690933425487, "34": 280.0690933425487, "35": 280.0690933425487, "36": 280.0690933425487, "37": 280.0690933425487, "38": 280.0690933425487, "39": 280.0690933425487, "40": 280.0690933425487, "41": 280.0690933425487, "42": 280.0690933425487, "43": 280.0690933425487, "44": 280.0690933425487, "45": 280.0690933425487, "46": 280.0690933425487, "47": 280.0690933425487, "48": 280.0690933425487, "49": 280.0690933425487, "50": 280.0690933425487, "51": 280.0690933425487, "52": 280.0690933425487, "53": 280.0690933425487, "54": 280.0690933425487, "55": 280.0690933425487, "56": 280.0690933425487, "57": 280.0690933425487, "58": 280.0690933425487, "59": 280.0690933425487, "60": 280.0690933425487, "61": 280.0690933425487, "62": 280.0690933425487, "63": 280.0690933425487, "64": 280.0690933425487, "65": 280.0690933425487, "66": 280.0690933425487, "67": 280.0690933425487, "68": 280.0690933425487, "69": 280.0690933425487, "70": 280.0690933425487, "71": 280.0690933425487, "72": 280.0690933425487}, "VIN-1402": {"44": 0.0, "45": 267.7365986394558, "46": 270.0638631023082, "47": 272.411356999267, "48": 274.7792561719742, "49": 277.1677379905515, "50": 279.57698136688657, "51": 279.57698136688657, "52": 279.57698136688657, "53": 279.57698136688657, "54": 279.57698136688657, "55": 279.57698136688657, "56": 279.57698136688657, "57": 279.57698136688657, "58": 279.57698136688657, "59": 279.57698136688657, "60": 279.57698136688657, "61": 279.57698136688657, "62": 279.57698136688657, "63": 279.57698136688657, "64": 279.57698136688657, "65": 279.57698136688657, "66": 279.57698136688657, "67": 279.57698136688657, "68": 279.57698136688657, "69": 279.57698136688657, "70": 279.57698136688657, "71": 279.57698136688657, "72": 279.57698136688657}, "VIN-1403": {"68": 0.0, "69": 269.57659863945577, "70": 271.919857055445, "71": 274.28348393083246, "72": 276.6676563157188}}
+
+        };
+        
+        // Update table based on time slider
+        const timeSlider = document.getElementById('time-slider');
+        const timeDisplay = document.getElementById('current-time-display');
+        const tbody = document.getElementById('bus-status-tbody');
+        let isPlaying = false;
+        let playInterval = null;
+        let currentTimeIndex = 0;
+        
+        function updateBusStatusTable(timeIndex) {
+            currentTimeIndex = timeIndex;
+            const timeStr = busStatusData.timeline[timeIndex];
+            timeDisplay.textContent = timeStr;
+            
+            // Update each bus row
+            const rows = tbody.querySelectorAll('tr');
+            rows.forEach(row => {
+                const busVin = row.getAttribute('data-bus-vin');
+                const connectorCell = row.querySelector('.connector-cell');
+                const powerCell = row.querySelector('.power-cell');
+                const stateCell = row.querySelector('.state-cell');
+                const socCell = row.querySelector('.soc-cell');
+                const blockCell = row.querySelector('.block-cell');
+                const locationCell = row.querySelector('.location-cell');
+                
+                // Update connector
+                const connector = busStatusData.busConnectors && busStatusData.busConnectors[busVin] && busStatusData.busConnectors[busVin][timeIndex];
+                if (connectorCell) {
+                    connectorCell.textContent = connector || '-';
+                }
+
+                // Update charging power (kW)
+                const power = busStatusData.busPowers 
+                    && busStatusData.busPowers[busVin] 
+                    && busStatusData.busPowers[busVin][timeIndex];
+                if (powerCell) {
+                    if (power !== undefined && power !== null) {
+                        powerCell.textContent = Number(power).toFixed(1);
+                    } else {
+                        powerCell.textContent = '-';
+                    }
+                }
+                
+                // Update state
+                const state = busStatusData.busStates[busVin] && busStatusData.busStates[busVin][timeIndex];
+                if (stateCell) {
+                    // If charging, show connector_id in state cell
+                    if (state === 'CHARGING' && connector) {
+                        stateCell.textContent = `${state} (${connector})`;
+                    } else {
+                        stateCell.textContent = state || '-';
+                    }
+                    // Color code by state
+                    stateCell.className = 'state-cell';
+                    if (state === 'RUNNING') {
+                        stateCell.style.backgroundColor = '#d4edda';
+                        stateCell.style.color = '#155724';
+                    } else if (state === 'CHARGING') {
+                        stateCell.style.backgroundColor = '#fff3cd';
+                        stateCell.style.color = '#856404';
+                    } else if (state === 'AVAILABLE') {
+                        stateCell.style.backgroundColor = '#d1ecf1';
+                        stateCell.style.color = '#0c5460';
+                    } else if (state === 'MAINTENANCE') {
+                        stateCell.style.backgroundColor = '#f8d7da';
+                        stateCell.style.color = '#721c24';
+                    }
+                }
+                
+                // Update SOC
+                const soc = busStatusData.busSOC[busVin] && busStatusData.busSOC[busVin][timeIndex];
+                if (socCell) {
+                    if (soc !== undefined && soc !== null) {
+                        socCell.textContent = soc.toFixed(1) + '%';
+                        // Color code by SOC level
+                        socCell.className = 'soc-cell';
+                        if (soc >= 80) {
+                            socCell.style.backgroundColor = '#d4edda';
+                        } else if (soc >= 50) {
+                            socCell.style.backgroundColor = '#fff3cd';
+                        } else if (soc >= 20) {
+                            socCell.style.backgroundColor = '#ffeaa7';
+                        } else {
+                            socCell.style.backgroundColor = '#f8d7da';
+                        }
+                    } else {
+                        socCell.textContent = '-';
+                        socCell.style.backgroundColor = '';
+                    }
+                }
+                
+                // Update assigned block
+                const block = busStatusData.busBlocks[busVin] && busStatusData.busBlocks[busVin][timeIndex];
+                if (blockCell) {
+                    blockCell.textContent = block || '-';
+                }
+                
+                // Update location
+                const location = busStatusData.busLocations[busVin] && busStatusData.busLocations[busVin][timeIndex];
+                if (locationCell) {
+                    locationCell.textContent = location || '-';
+                }
+            });
+            
+            // Update statistics
+            let runningCount = 0;
+            let chargingCount = 0;
+            let availableCount = 0;
+            let unknownCount = 0;
+            
+            rows.forEach(row => {
+                const busVin = row.getAttribute('data-bus-vin');
+                const state = busStatusData.busStates[busVin] && busStatusData.busStates[busVin][timeIndex];
+                const soc = busStatusData.busSOC[busVin] && busStatusData.busSOC[busVin][timeIndex];
+                
+                if (state === 'RUNNING') {
+                    runningCount++;
+                } else if (state === 'CHARGING') {
+                    // If bus is charging and SOC >= 80%, count as available
+                    if (soc !== undefined && soc !== null && soc >= 80) {
+                        availableCount++;
+                    } else {
+                        chargingCount++;
+                    }
+                } else if (state === 'AVAILABLE') {
+                    availableCount++;
+                } else {
+                    unknownCount++;
+                }
+            });
+            
+            // Update stat cards
+            document.getElementById('stat-running').textContent = runningCount;
+            document.getElementById('stat-charging').textContent = chargingCount;
+            document.getElementById('stat-available').textContent = availableCount;
+            document.getElementById('stat-unknown').textContent = unknownCount;
+        }
+        
+        function togglePlayPause() {
+            const btn = document.getElementById('play-pause-btn');
+            if (isPlaying) {
+                // Pause
+                if (playInterval) {
+                    clearInterval(playInterval);
+                    playInterval = null;
+                }
+                isPlaying = false;
+                btn.textContent = '▶ Play';
+                btn.style.backgroundColor = '#007bff';
+            } else {
+                // Play
+                isPlaying = true;
+                btn.textContent = '⏸ Pause';
+                btn.style.backgroundColor = '#dc3545';
+                
+                playInterval = setInterval(function() {
+                    if (currentTimeIndex < busStatusData.timeline.length - 1) {
+                        currentTimeIndex++;
+                        timeSlider.value = currentTimeIndex;
+                        updateBusStatusTable(currentTimeIndex);
+                    } else {
+                        // Reached end, pause
+                        togglePlayPause();
+                    }
+                }, 500); // Update every 500ms (0.5 seconds per time point)
+            }
+        }
+        
+        // Initialize with first time point
+        updateBusStatusTable(0);
+        
+        // Update on slider change
+        timeSlider.addEventListener('input', function(e) {
+            const newIndex = parseInt(e.target.value);
+            updateBusStatusTable(newIndex);
+            // If playing, update currentTimeIndex to match slider
+            if (isPlaying) {
+                currentTimeIndex = newIndex;
+            }
+        });
+    </script>
+    
+    <style>
+        .bus-status-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            table-layout: fixed; /* Fixed table layout to prevent column width jumping */
+        }
+        .bus-status-table th {
+            position: sticky;
+            top: 0;
+            background-color: #343a40;
+            color: white;
+            padding: 10px;
+            text-align: left;
+            z-index: 10;
+        }
+        .bus-status-table th:nth-child(1) { width: 8%; }   /* Bus Nr */
+        .bus-status-table th:nth-child(2) { width: 18%; }  /* Last Charged Connector */
+        .bus-status-table th:nth-child(3) { width: 12%; }  /* Charging Power (kW) */
+        .bus-status-table th:nth-child(4) { width: 18%; }  /* State */
+        .bus-status-table th:nth-child(5) { width: 10%; }  /* SOC (%) */
+        .bus-status-table th:nth-child(6) { width: 15%; }  /* Assigned Block */
+        .bus-status-table th:nth-child(7) { width: 29%; }  /* Location */
+        .bus-status-table td {
+            padding: 8px 10px;
+            border: 1px solid #dee2e6;
+        }
+        /* Allow text wrapping for Location column, but keep others on one line */
+        .bus-status-table td:not(.location-cell) {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .location-cell {
+            word-wrap: break-word;
+            word-break: break-word;
+        }
+        .bus-status-table tbody tr:hover {
+            background-color: #f8f9fa;
+        }
+        .state-cell, .soc-cell, .power-cell {
+            font-weight: 500;
+            text-align: center;
+        }
+    </style>

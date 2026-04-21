@@ -110,6 +110,7 @@ class VisualizationSimulationService:
 
             bus = buses[idx % len(buses)]
             assign_time = block.journeys[0].first_departure_datetime.timestamp()
+            block_end_time = assign_time
             logger.planning_log.append(
                 {
                     "event": "block_assigned",
@@ -123,19 +124,20 @@ class VisualizationSimulationService:
             for journey in block.journeys:
                 self._simulate_journey(bus, block, journey, logger, completed_journeys)
                 journey_end = journey.points[-1].arrival_datetime.timestamp() if journey.points else assign_time
-                current_time = max(current_time, journey_end)
+                block_end_time = max(block_end_time, journey_end)
 
             logger.planning_log.append(
                 {
                     "event": "block_completed",
-                    "time": current_time,
+                    "time": block_end_time,
                     "block_id": block.block_id,
                     "bus_vin": bus.vin_number,
                     "bus_number": bus.vehicle_number,
                 }
             )
 
-            self._maybe_charge(bus, current_time, logger)
+            self._maybe_charge(bus, block_end_time, logger)
+            current_time = max(current_time, block_end_time)
             current_time = max(current_time, logger.laadinfra_log[-1]["time"] if logger.laadinfra_log else current_time)
 
         return VisualizationSimulationResult(
@@ -227,6 +229,14 @@ class VisualizationSimulationService:
             )
 
             if bus.has_low_soc(self.low_soc_alert_threshold_percent):
+                already_marked_low_soc = any(
+                    e.get("event") == "journey_skipped_low_soc"
+                    and e.get("block_id") == block.block_id
+                    and e.get("journey_id") == journey.journey_id
+                    for e in logger.planning_log
+                )
+                if already_marked_low_soc:
+                    continue
                 logger.planning_log.append(
                     {
                         "event": "journey_skipped_low_soc",
