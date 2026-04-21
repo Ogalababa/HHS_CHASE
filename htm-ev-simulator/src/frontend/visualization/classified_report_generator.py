@@ -1863,22 +1863,37 @@ def generate_laadinfra_detailed_section(
     except Exception as e:
         pass
     # #endregion
-    # Build power timeline for each location
-    location_power_timeline = {}  # {location_id: [(time, power_kw), ...]}
+    # Build power timeline for each location from per-bus power aggregation.
+    # Rationale: `location_total_power_kw` in logs can lag/under-report when
+    # multiple charging loops write in the same timestamp. Aggregating `power_kw`
+    # by (location_id, time) gives the true location total for charting.
+    location_time_power_sum: dict[str, dict[float, float]] = {}
+    location_time_active_buses: dict[str, dict[float, set[str]]] = {}
     for log in laadinfra_log:
-        if log.get('event') == 'charging_progress' or log.get('event') == 'charging_started':
-            location_id = log.get('location_id')
-            power_kw = log.get('location_total_power_kw')
-            time = log.get('time')
-            
-            if location_id and power_kw is not None and time is not None:
-                if location_id not in location_power_timeline:
-                    location_power_timeline[location_id] = []
-                location_power_timeline[location_id].append((time, power_kw))
-    
-    # Sort power timeline for each location by time
-    for location_id in location_power_timeline:
-        location_power_timeline[location_id].sort(key=lambda x: x[0])
+        if log.get('event') != 'charging_progress':
+            continue
+        location_id = log.get('location_id')
+        time = log.get('time')
+        power_kw = log.get('power_kw')
+        bus_vin = log.get('bus_vin')
+        if not location_id or time is None or power_kw is None:
+            continue
+        if location_id not in location_time_power_sum:
+            location_time_power_sum[location_id] = {}
+        if location_id not in location_time_active_buses:
+            location_time_active_buses[location_id] = {}
+        location_time_power_sum[location_id][float(time)] = (
+            location_time_power_sum[location_id].get(float(time), 0.0) + float(power_kw)
+        )
+        if float(time) not in location_time_active_buses[location_id]:
+            location_time_active_buses[location_id][float(time)] = set()
+        if bus_vin and float(power_kw) > 0.001:
+            location_time_active_buses[location_id][float(time)].add(str(bus_vin))
+
+    location_power_timeline = {
+        loc_id: sorted([(t, p) for t, p in time_map.items()], key=lambda x: x[0])
+        for loc_id, time_map in location_time_power_sum.items()
+    }
     # Build a map of journey_start events to help close charging sessions
     # Format: {bus_vin: {time: True}} for journey_start events
     journey_starts = {}
@@ -2340,8 +2355,15 @@ def generate_laadinfra_detailed_section(
         if loc_id in location_power_timeline and location_power_timeline[loc_id]:
             power_data = location_power_timeline[loc_id]
             # Prepare data for Chart.js
-            times = [datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M:%S') for t, _ in power_data]
+            time_points = [t for t, _ in power_data]
+            times = [datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M:%S') for t in time_points]
             powers = [p for _, p in power_data]
+            # Compute active charging buses at each time point for this location.
+            # A bus counts only when charging power > 0 at that timestamp.
+            active_by_time = location_time_active_buses.get(loc_id, {})
+            charging_bus_counts: List[int] = []
+            for ts in time_points:
+                charging_bus_counts.append(len(active_by_time.get(ts, set())))
 
             # Optional: compute limit line for Telexstraat using provided hourly limits
             telexstraat_limits_values = None
@@ -2368,6 +2390,16 @@ def generate_laadinfra_detailed_section(
                     "backgroundColor": "rgba(75, 192, 192, 0.2)",
                     "tension": 0.1,
                     "fill": True,
+                    "yAxisID": "y",
+                },
+                {
+                    "label": "Active Charging Buses (power>0)",
+                    "data": charging_bus_counts,
+                    "borderColor": "rgb(255, 99, 132)",
+                    "backgroundColor": "rgba(255, 99, 132, 0.15)",
+                    "tension": 0.1,
+                    "fill": False,
+                    "yAxisID": "y1",
                 }
             ]
             if telexstraat_limits_values is not None:
@@ -2379,6 +2411,7 @@ def generate_laadinfra_detailed_section(
                         "borderDash": [5, 5],
                         "pointRadius": 0,
                         "fill": False,
+                        "yAxisID": "y",
                     }
                 )
 
@@ -2406,6 +2439,20 @@ def generate_laadinfra_detailed_section(
                                                 title: {{
                                                     display: true,
                                                     text: 'Power (kW)'
+                                                }}
+                                            }},
+                                            y1: {{
+                                                beginAtZero: true,
+                                                position: 'right',
+                                                grid: {{
+                                                    drawOnChartArea: false
+                                                }},
+                                                title: {{
+                                                    display: true,
+                                                    text: 'Charging Buses'
+                                                }},
+                                                ticks: {{
+                                                    precision: 0
                                                 }}
                                             }},
                                             x: {{

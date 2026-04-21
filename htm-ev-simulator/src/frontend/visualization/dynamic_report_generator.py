@@ -17,6 +17,7 @@ import json
 import bisect
 
 from .bus_status_generator import generate_bus_status_section
+from .connector_status_generator import generate_connector_status_section
 from .classified_report_generator import (
     generate_breakdown_table_body,
     generate_laadinfra_detailed_section,
@@ -253,12 +254,14 @@ def generate_dynamic_report(
         planning_log,
     )
     bus_status_html = generate_bus_status_section(sim, bus_log, planning_log, laadinfra_log)
+    connector_status_html = generate_connector_status_section(sim, laadinfra_log)
 
     (report_parts_dir / "statistics.html").write_text(statistics_html, encoding="utf-8")
     (report_parts_dir / "summary.html").write_text(summary_html, encoding="utf-8")
     (report_parts_dir / "breakdown_rows.html").write_text(breakdown_rows_html, encoding="utf-8")
     (report_parts_dir / "laadinfra.html").write_text(laadinfra_html, encoding="utf-8")
     (report_parts_dir / "bus_status.html").write_text(bus_status_html, encoding="utf-8")
+    (report_parts_dir / "connector_status.html").write_text(connector_status_html, encoding="utf-8")
 
     template_path = Path(__file__).parent / "templates" / "combined_report.html"
     template_html = template_path.read_text(encoding="utf-8")
@@ -273,6 +276,7 @@ def generate_dynamic_report(
     dynamic_breakdown_rows = '<tr id="dyn-breakdown-loading"><td colspan="7">Loading simulation breakdown...</td></tr>'
     dynamic_laadinfra = '<div id="dyn-laadinfra-slot"></div>'
     dynamic_bus_status = '<div id="dyn-busstatus-slot"></div>'
+    dynamic_connector_status = '<div id="dyn-connector-slot"></div>'
 
     script = """
 <script>
@@ -360,6 +364,14 @@ def generate_dynamic_report(
     loaded.add("busstatus");
   };
 
+  const loadConnectorStatus = async () => {
+    if (loaded.has("connectorstatus")) return;
+    const slot = document.getElementById("dyn-connector-slot");
+    if (!slot) return;
+    await injectHtmlWithScripts(slot, await fetchPart("connector_status.html"));
+    loaded.add("connectorstatus");
+  };
+
   const wireTabLazyLoad = () => {
     const links = Array.from(document.querySelectorAll(".tab-link"));
     const plan = [
@@ -367,6 +379,7 @@ def generate_dynamic_report(
       { keyword: "Planning Detailed Report", loader: loadReport },
       { keyword: "LaadInfra Detailed Report", loader: loadLaadinfra },
       { keyword: "Bus Status", loader: loadBusStatus },
+      { keyword: "Connector Status", loader: loadConnectorStatus },
     ];
     for (const link of links) {
       const text = (link.textContent || "").trim();
@@ -393,4 +406,5 @@ def generate_dynamic_report(
     html_out = html_out.replace("{{ breakdown_table_body }}", dynamic_breakdown_rows)
     html_out = html_out.replace("{{ laadinfra_section }}", dynamic_laadinfra)
     html_out = html_out.replace("{{ bus_status_section }}", dynamic_bus_status + script)
+    html_out = html_out.replace("{{ connector_status_section }}", dynamic_connector_status)
     out.write_text(html_out, encoding="utf-8")

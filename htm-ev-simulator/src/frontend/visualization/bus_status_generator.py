@@ -40,12 +40,14 @@ def generate_bus_status_section(
     # Create a mapping of bus_vin to bus_number for easy lookup
     bus_vin_to_number = {bus.vin_number: bus.vehicle_number for bus in all_buses}
     
-    # Build timeline of bus states
+    # Build timeline of bus states within simulation window.
     # We'll sample at regular intervals (every 5 minutes)
-    sim_start_time = sim.current_time if hasattr(sim, 'current_time') else 0
-    # Get simulation start time from first event or config
-    if bus_log:
-        sim_start_time = min(log.get('time', sim_start_time) for log in bus_log)
+    sim_start_time = getattr(sim, "simulation_start_time", None)
+    sim_end_time = getattr(sim, "simulation_end_time", None)
+    if sim_start_time is None:
+        sim_start_time = sim.current_time if hasattr(sim, 'current_time') else 0
+        if bus_log:
+            sim_start_time = min(log.get('time', sim_start_time) for log in bus_log)
     
     # Sample every 5 minutes
     timeline_points = []
@@ -53,10 +55,11 @@ def generate_bus_status_section(
     sample_interval = 5 * 60  # 5 minutes in seconds
     
     # Find simulation end time
-    if bus_log:
-        sim_end_time = max(log.get('time', current_time) for log in bus_log)
-    else:
-        sim_end_time = current_time + 24 * 3600  # Default to 24 hours
+    if sim_end_time is None:
+        if bus_log:
+            sim_end_time = max(log.get('time', current_time) for log in bus_log)
+        else:
+            sim_end_time = current_time + 24 * 3600  # Default to 24 hours
     
     # Build state timeline for each bus
     bus_states_timeline = defaultdict(dict)  # {bus_vin: {time: state}}
@@ -64,6 +67,7 @@ def generate_bus_status_section(
     bus_locations_timeline = defaultdict(dict)  # {bus_vin: {time: location_name}}
     bus_assigned_blocks = defaultdict(dict)  # {bus_vin: {time: block_id}}
     bus_connector_timeline = defaultdict(dict)  # {bus_vin: {time: connector_id}} - tracks which connector is being used
+    bus_connector_status_timeline = defaultdict(dict)  # {bus_vin: {time: connector_status}}
     bus_charging_stopped_timeline = defaultdict(list)  # {bus_vin: [stop_times]} - tracks when charging stopped
     bus_power_timeline = defaultdict(dict)  # {bus_vin: {time: power_kw}} - tracks charging power over time
     
@@ -134,6 +138,9 @@ def generate_bus_status_section(
                     connector_id = log.get('connector_id', 'N/A')
                     if connector_id and connector_id != 'N/A':
                         bus_connector_timeline[bus_vin][time] = connector_id
+                connector_status = log.get('connector_status')
+                if connector_status:
+                    bus_connector_status_timeline[bus_vin][time] = str(connector_status).upper()
             
             # Track when charging stops
             if event_type == 'charging_stopped':
@@ -165,7 +172,7 @@ def generate_bus_status_section(
             bus_assigned_blocks[bus_vin][time] = None
     
     # Generate timeline points (every 5 minutes)
-    while current_time <= sim_end_time:
+    while current_time <= float(sim_end_time):
         timeline_points.append(current_time)
         current_time += sample_interval
     
@@ -216,6 +223,7 @@ def generate_bus_status_section(
                     <tr>
                         <th>Bus Nr</th>
                         <th>Last Charged Connector</th>
+                        <th>Connector Status</th>
                         <th>Charging Power (kW)</th>
                         <th>State</th>
                         <th>SOC (%)</th>
@@ -232,6 +240,7 @@ def generate_bus_status_section(
                     <tr data-bus-vin="{bus.vin_number}">
                         <td>{bus.vehicle_number}</td>
                         <td class="connector-cell" data-bus-vin="{bus.vin_number}">-</td>
+                        <td class="connector-status-cell" data-bus-vin="{bus.vin_number}">-</td>
                         <td class="power-cell" data-bus-vin="{bus.vin_number}">-</td>
                         <td class="state-cell" data-bus-vin="{bus.vin_number}">-</td>
                         <td class="soc-cell" data-bus-vin="{bus.vin_number}">-</td>
@@ -383,6 +392,24 @@ def generate_bus_status_section(
     html_parts.append(f"{json.dumps(bus_connectors_data)},\n")
 
     html_parts.append("""
+            connectorStatus: """)
+
+    bus_connector_status_data = {}
+    for bus_vin in bus_connector_status_timeline:
+        bus_connector_status_data[bus_vin] = {}
+        for time_idx, time_point in enumerate(timeline_points):
+            status_at_time = None
+            for s_time, s_value in sorted(bus_connector_status_timeline[bus_vin].items()):
+                if s_time <= time_point:
+                    status_at_time = s_value
+                else:
+                    break
+            if status_at_time:
+                bus_connector_status_data[bus_vin][time_idx] = status_at_time
+
+    html_parts.append(f"{json.dumps(bus_connector_status_data)},\n")
+
+    html_parts.append("""
             busPowers: """)
 
     # Build bus charging power data structure
@@ -423,32 +450,45 @@ def generate_bus_status_section(
             rows.forEach(row => {
                 const busVin = row.getAttribute('data-bus-vin');
                 const connectorCell = row.querySelector('.connector-cell');
+                const connectorStatusCell = row.querySelector('.connector-status-cell');
                 const powerCell = row.querySelector('.power-cell');
                 const stateCell = row.querySelector('.state-cell');
                 const socCell = row.querySelector('.soc-cell');
                 const blockCell = row.querySelector('.block-cell');
                 const locationCell = row.querySelector('.location-cell');
+                const state = busStatusData.busStates[busVin] && busStatusData.busStates[busVin][timeIndex];
                 
                 // Update connector
-                const connector = busStatusData.busConnectors && busStatusData.busConnectors[busVin] && busStatusData.busConnectors[busVin][timeIndex];
-                if (connectorCell) {
-                    connectorCell.textContent = connector || '-';
-                }
-
+                const rawConnector = busStatusData.busConnectors && busStatusData.busConnectors[busVin] && busStatusData.busConnectors[busVin][timeIndex];
+                const connectorStatus = busStatusData.connectorStatus
+                    && busStatusData.connectorStatus[busVin]
+                    && busStatusData.connectorStatus[busVin][timeIndex];
                 // Update charging power (kW)
                 const power = busStatusData.busPowers 
                     && busStatusData.busPowers[busVin] 
                     && busStatusData.busPowers[busVin][timeIndex];
+                const powerNum = (power !== undefined && power !== null) ? Number(power) : null;
+                const isActivelyCharging = powerNum !== null && powerNum > 0.001;
+                // Prevent stale connector/status display when bus is running.
+                const connector = state === 'RUNNING' ? null : rawConnector;
+                const effectiveConnectorStatus = state === 'RUNNING'
+                    ? null
+                    : (isActivelyCharging ? 'CHARGING' : (connectorStatus || null));
+                if (connectorCell) {
+                    connectorCell.textContent = connector || '-';
+                }
+                if (connectorStatusCell) {
+                    connectorStatusCell.textContent = effectiveConnectorStatus || '-';
+                }
                 if (powerCell) {
-                    if (power !== undefined && power !== null) {
-                        powerCell.textContent = Number(power).toFixed(1);
+                    if (state !== 'RUNNING' && powerNum !== null) {
+                        powerCell.textContent = powerNum.toFixed(1);
                     } else {
                         powerCell.textContent = '-';
                     }
                 }
                 
                 // Update state
-                const state = busStatusData.busStates[busVin] && busStatusData.busStates[busVin][timeIndex];
                 if (stateCell) {
                     // If charging, show connector_id in state cell
                     if (state === 'CHARGING' && connector) {
@@ -518,16 +558,14 @@ def generate_bus_status_section(
                 const busVin = row.getAttribute('data-bus-vin');
                 const state = busStatusData.busStates[busVin] && busStatusData.busStates[busVin][timeIndex];
                 const soc = busStatusData.busSOC[busVin] && busStatusData.busSOC[busVin][timeIndex];
+                const power = busStatusData.busPowers && busStatusData.busPowers[busVin] && busStatusData.busPowers[busVin][timeIndex];
+                const powerNum = (power !== undefined && power !== null) ? Number(power) : null;
+                const isActivelyCharging = powerNum !== null && powerNum > 0.001;
                 
                 if (state === 'RUNNING') {
                     runningCount++;
-                } else if (state === 'CHARGING') {
-                    // If bus is charging and SOC >= 80%, count as available
-                    if (soc !== undefined && soc !== null && soc >= 80) {
-                        availableCount++;
-                    } else {
-                        chargingCount++;
-                    }
+                } else if (state === 'CHARGING' || isActivelyCharging) {
+                    chargingCount++;
                 } else if (state === 'AVAILABLE') {
                     availableCount++;
                 } else {
@@ -604,11 +642,12 @@ def generate_bus_status_section(
         }
         .bus-status-table th:nth-child(1) { width: 8%; }   /* Bus Nr */
         .bus-status-table th:nth-child(2) { width: 18%; }  /* Last Charged Connector */
-        .bus-status-table th:nth-child(3) { width: 12%; }  /* Charging Power (kW) */
-        .bus-status-table th:nth-child(4) { width: 18%; }  /* State */
-        .bus-status-table th:nth-child(5) { width: 10%; }  /* SOC (%) */
-        .bus-status-table th:nth-child(6) { width: 15%; }  /* Assigned Block */
-        .bus-status-table th:nth-child(7) { width: 29%; }  /* Location */
+        .bus-status-table th:nth-child(3) { width: 12%; }  /* Connector Status */
+        .bus-status-table th:nth-child(4) { width: 12%; }  /* Charging Power (kW) */
+        .bus-status-table th:nth-child(5) { width: 16%; }  /* State */
+        .bus-status-table th:nth-child(6) { width: 9%; }   /* SOC (%) */
+        .bus-status-table th:nth-child(7) { width: 14%; }  /* Assigned Block */
+        .bus-status-table th:nth-child(8) { width: 19%; }  /* Location */
         .bus-status-table td {
             padding: 8px 10px;
             border: 1px solid #dee2e6;

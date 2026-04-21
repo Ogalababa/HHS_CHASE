@@ -23,6 +23,17 @@
             align-items: center;
         }
         h1 { margin: 0; font-size: 1.5rem; }
+        .header-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+        }
+        .config-link {
+            color: #ffffff;
+            text-decoration: underline;
+            font-size: 0.9rem;
+        }
 
         .tab-bar {
             display: flex;
@@ -247,7 +258,10 @@
 <body>
     <header>
         <h1>{{ title }}</h1>
-        <span>Simulation stopped at: {{ sim_stop_time }}</span>
+        <div class="header-meta">
+            <span>Simulation stopped at: {{ sim_stop_time }}</span>
+            <a class="config-link" href="http://127.0.0.1:8765/" target="_blank" rel="noopener noreferrer">Back to Simulation Configurator</a>
+        </div>
     </header>
 
     <div class="tab-bar">
@@ -255,6 +269,7 @@
         <button class="tab-link" onclick="openTab(event, 'Report')">Planning Detailed Report</button>
         <button class="tab-link" onclick="openTab(event, 'LaadInfra')">LaadInfra Detailed Report</button>
         <button class="tab-link" onclick="openTab(event, 'BusStatus')">Bus Status</button>
+        <button class="tab-link" onclick="openTab(event, 'ConnectorStatus')">Connector Status Over Time</button>
     </div>
 
     <div id="Statistics" class="tab-content active">
@@ -290,6 +305,9 @@
 
     <div id="BusStatus" class="tab-content">
         {{ bus_status_section }}
+    </div>
+    <div id="ConnectorStatus" class="tab-content">
+        {{ connector_status_section }}
     </div>
 </body>
 </html>

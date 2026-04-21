@@ -213,6 +213,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Set all buses SOC to 100%% at simulation start.",
     )
+    parser.add_argument(
+        "--enable-power-limit-strategy",
+        action="store_true",
+        help="Apply grid power limit strategy (Telexstraat/30002 only).",
+    )
 
     parser.add_argument(
         "--report-path",
@@ -391,6 +396,7 @@ def main() -> None:
         enable_precheck_replacement_strategy=args.enable_precheck_replacement_strategy,
         enable_opportunity_charging_strategy=args.enable_opportunity_charging_strategy,
         enable_start_full_soc_strategy=args.enable_start_full_soc_strategy,
+        enable_power_limit_strategy=args.enable_power_limit_strategy,
         simulation_start_timestamp=sim_start_dt.timestamp(),
         simulation_end_timestamp=sim_end_dt.timestamp(),
     )
@@ -410,7 +416,7 @@ def main() -> None:
     generate_dynamic_report(
         sim=simulation,
         output_path=str(report_path),
-        title="Visualization Demo Report",
+        title="Visualization Report",
         config=config,
     )
 

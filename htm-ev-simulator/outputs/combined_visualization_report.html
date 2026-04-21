@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Visualization Demo Report</title>
+    <title>Visualization Report</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -23,6 +23,17 @@
             align-items: center;
         }
         h1 { margin: 0; font-size: 1.5rem; }
+        .header-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+        }
+        .config-link {
+            color: #ffffff;
+            text-decoration: underline;
+            font-size: 0.9rem;
+        }
 
         .tab-bar {
             display: flex;
@@ -246,8 +257,11 @@
 </head>
 <body>
     <header>
-        <h1>Visualization Demo Report</h1>
-        <span>Simulation window: 2026-02-04 06:00:00 - 2026-02-04 18:00:00</span>
+        <h1>Visualization Report</h1>
+        <div class="header-meta">
+            <span>Simulation window: 2026-02-02 05:00:00 - 2026-02-03 05:00:00</span>
+            <a class="config-link" href="http://127.0.0.1:8765/" target="_blank" rel="noopener noreferrer">Back to Simulation Configurator</a>
+        </div>
     </header>
 
     <div class="tab-bar">
@@ -255,6 +269,7 @@
         <button class="tab-link" onclick="openTab(event, 'Report')">Planning Detailed Report</button>
         <button class="tab-link" onclick="openTab(event, 'LaadInfra')">LaadInfra Detailed Report</button>
         <button class="tab-link" onclick="openTab(event, 'BusStatus')">Bus Status</button>
+        <button class="tab-link" onclick="openTab(event, 'ConnectorStatus')">Connector Status Over Time</button>
     </div>
 
     <div id="Statistics" class="tab-content active">
@@ -375,6 +390,14 @@
     loaded.add("busstatus");
   };
 
+  const loadConnectorStatus = async () => {
+    if (loaded.has("connectorstatus")) return;
+    const slot = document.getElementById("dyn-connector-slot");
+    if (!slot) return;
+    await injectHtmlWithScripts(slot, await fetchPart("connector_status.html"));
+    loaded.add("connectorstatus");
+  };
+
   const wireTabLazyLoad = () => {
     const links = Array.from(document.querySelectorAll(".tab-link"));
     const plan = [
@@ -382,6 +405,7 @@
       { keyword: "Planning Detailed Report", loader: loadReport },
       { keyword: "LaadInfra Detailed Report", loader: loadLaadinfra },
       { keyword: "Bus Status", loader: loadBusStatus },
+      { keyword: "Connector Status", loader: loadConnectorStatus },
     ];
     for (const link of links) {
       const text = (link.textContent || "").trim();
@@ -399,6 +423,9 @@
 })();
 </script>
 
+    </div>
+    <div id="ConnectorStatus" class="tab-content">
+        <div id="dyn-connector-slot"></div>
     </div>
 </body>
 </html>

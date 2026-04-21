@@ -34,6 +34,8 @@ class Connector:
 
     # Dynamic state
     connected_bus: Optional["Bus"] = field(default=None, repr=False)
+    # Runtime status: available | charging | connected
+    status: str = "available"
     # Offered/setpoint power from charger side (kW). The bus may accept less due
     # to its own charging envelope.
     offered_power_kw: float = 0.0
@@ -58,7 +60,7 @@ class Connector:
 
     @property
     def is_available(self) -> bool:
-        return self.connected_bus is None
+        return self.status == "available" and self.connected_bus is None
 
     def connect_bus(self, bus: "Bus") -> None:
         """
@@ -77,12 +79,22 @@ class Connector:
             )
 
         self.connected_bus = bus
+        self.status = "connected"
+
+    def set_charging(self) -> None:
+        if self.connected_bus is not None:
+            self.status = "charging"
+
+    def set_connected(self) -> None:
+        if self.connected_bus is not None:
+            self.status = "connected"
 
     def disconnect_bus(self) -> None:
         """
         Disconnect the current bus from this connector and reset dynamic power state.
         """
         self.connected_bus = None
+        self.status = "available"
         self.offered_power_kw = 0.0
         self.current_power_kw = 0.0
 

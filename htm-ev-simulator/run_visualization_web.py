@@ -17,6 +17,7 @@ import uuid
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -36,6 +37,7 @@ class SimulationJob:
     report_relative_path: str
     stdout: str = ""
     stderr: str = ""
+    return_code: int | None = None
 
 
 _jobs: dict[str, SimulationJob] = {}
@@ -208,6 +210,10 @@ def _build_form_page(message: str = "", error: str = "") -> str:
         <input type="checkbox" name="enable_start_full_soc_strategy" />
         Enable full SOC start strategy (set all buses SOC=100% at simulation start)
       </label>
+      <label>
+        <input type="checkbox" name="enable_power_limit_strategy" />
+        Enable power limit strategy (apply grid cap at Telexstraat / point 30002 only)
+      </label>
     </fieldset>
 
     <fieldset>
@@ -247,13 +253,12 @@ def _build_status_page(job: SimulationJob) -> str:
 
     auto_refresh = ""
     if job.status in {"queued", "running"}:
-        auto_refresh = '<meta http-equiv="refresh" content="2">'
+        auto_refresh = '<meta http-equiv="refresh" content="1">'
 
     action_html = ""
     if job.status == "success":
         encoded = urllib.parse.quote(job.report_relative_path)
         action_html = f'<p><a href="/report?path={encoded}">Open Report</a></p>'
-        action_html += f"<script>setTimeout(function(){{window.location='/report?path={encoded}';}}, 1200);</script>"
     elif job.status == "failed":
         action_html = '<p><a href="/">Back to config</a></p>'
 
@@ -298,7 +303,7 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         "--sim-start",
         v("sim_start", "06:00"),
         "--sim-hours",
-        v("sim_hours", "12"),
+        v("sim_hours", "48"),
         "--use-real-buses",
         v("use_real_buses", "omniplus"),
         "--low-soc-threshold",
@@ -325,6 +330,8 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         args.append("--enable-opportunity-charging-strategy")
     if "enable_start_full_soc_strategy" in form:
         args.append("--enable-start-full-soc-strategy")
+    if "enable_power_limit_strategy" in form:
+        args.append("--enable-power-limit-strategy")
 
     vins = v("omniplus_vins", "")
     if vins:
@@ -362,21 +369,46 @@ def _run_job(job_id: str, args: list[str]) -> None:
             return
         job.status = "running"
 
-    completed = subprocess.run(
+    process = subprocess.Popen(
         args,
         cwd=str(PROJECT_ROOT),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
+        bufsize=1,
+        universal_newlines=True,
     )
+
+    def _append_stream(stream: TextIO | None, attr_name: str) -> None:
+        if stream is None:
+            return
+        for line in iter(stream.readline, ""):
+            with _jobs_lock:
+                live_job = _jobs.get(job_id)
+                if not live_job:
+                    break
+                current_value = getattr(live_job, attr_name, "")
+                setattr(live_job, attr_name, current_value + line)
+        stream.close()
+
+    stdout_thread = threading.Thread(
+        target=_append_stream, args=(process.stdout, "stdout"), daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=_append_stream, args=(process.stderr, "stderr"), daemon=True
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    return_code = process.wait()
+    stdout_thread.join(timeout=2)
+    stderr_thread.join(timeout=2)
 
     with _jobs_lock:
         job = _jobs.get(job_id)
         if not job:
             return
-        job.stdout = completed.stdout or ""
-        job.stderr = completed.stderr or ""
-        job.status = "success" if completed.returncode == 0 else "failed"
+        job.return_code = return_code
+        job.status = "success" if return_code == 0 else "failed"
 
 
 @app.get("/", response_class=HTMLResponse)
