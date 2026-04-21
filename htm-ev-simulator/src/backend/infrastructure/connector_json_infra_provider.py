@@ -189,6 +189,11 @@ class ConnectorJsonInfrastructureProvider(InfrastructureProviderPort):
                 raise InfraJsonAdapterError(f"Invalid limits for location {location_id}")
 
             profile = _build_daily_power_profile(limits=limits, tzname=tzname)
+            location = locations_by_id.get(location_id)
+            if location is not None:
+                # Also bind profile on location level to avoid relying solely on
+                # optional grid linkage during simulation.
+                location.max_power_profile = profile
             for gid in grid_ids:
                 grid = grids_by_id.get(gid)
                 if grid is not None:

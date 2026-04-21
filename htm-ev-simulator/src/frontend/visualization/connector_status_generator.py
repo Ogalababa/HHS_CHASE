@@ -37,11 +37,19 @@ def generate_connector_status_section(sim: Any, laadinfra_log: List[Dict[str, An
     if sim_end is None:
         sim_end = max((e.get("time", sim_start) for e in laadinfra_log), default=sim_start)
 
-    timeline_points: List[float] = []
-    t = float(sim_start)
-    while t <= float(sim_end):
-        timeline_points.append(t)
-        t += 300.0
+    # Use exact charging-progress timestamps for truthful "same-time" totals.
+    # Rationale: fixed 5-minute bins can merge events from different seconds and
+    # inflate apparent concurrent power.
+    progress_times = sorted(
+        {
+            float(e.get("time"))
+            for e in laadinfra_log
+            if e.get("event") == "charging_progress"
+            and e.get("time") is not None
+            and float(sim_start) <= float(e.get("time")) <= float(sim_end)
+        }
+    )
+    timeline_points: List[float] = progress_times if progress_times else [float(sim_start)]
 
     connector_events: dict[str, List[dict[str, Any]]] = defaultdict(list)
     connector_meta: dict[str, dict[str, str]] = {}
@@ -67,6 +75,7 @@ def generate_connector_status_section(sim: Any, laadinfra_log: List[Dict[str, An
             grouped[str(loc)][str(charger)].append(key)
         connector_events[key].append(
             {
+                "event": event,
                 "time": float(ts),
                 "status": str(entry.get("connector_status") or "UNKNOWN").upper(),
                 "bus_number": entry.get("bus_number"),
@@ -87,9 +96,20 @@ def generate_connector_status_section(sim: Any, laadinfra_log: List[Dict[str, An
             latest = _latest_at_or_before(evs, ts)
             if latest is not None:
                 normalized = dict(latest)
-                # Only CHARGING state contributes power; CONNECTED/AVAILABLE waits at 0 kW.
-                if str(normalized.get("status") or "").upper() != "CHARGING":
+                # Use only exact timestamp power to avoid cross-second aggregation.
+                in_bin = [
+                    ev for ev in evs
+                    if abs(float(ev["time"]) - float(ts)) < 1e-6 and ev.get("event") == "charging_progress"
+                ]
+                if in_bin:
+                    latest_bin = in_bin[-1]
+                    normalized["power_kw"] = float(latest_bin.get("power_kw") or 0.0)
+                    normalized["bus_number"] = latest_bin.get("bus_number")
+                    normalized["status"] = str(latest_bin.get("status") or normalized.get("status") or "UNKNOWN").upper()
+                else:
                     normalized["power_kw"] = 0.0
+                    if str(normalized.get("status") or "").upper() == "CHARGING":
+                        normalized["status"] = "CONNECTED"
                 state_by_connector[key][idx] = normalized
 
     location_total: dict[str, dict[int, float]] = defaultdict(dict)
@@ -138,22 +158,20 @@ def generate_connector_status_section(sim: Any, laadinfra_log: List[Dict[str, An
 """
         )
         for charger in sorted(grouped[loc].keys()):
-            for key in grouped[loc][charger]:
-                meta = connector_meta[key]
-                conn_id = meta["connector_id"]
-                conn_safe = _safe_id(key)
-                html.append(
-                    f"""
-      <div class="connector-section">
-        <div class="connector-header collapsed" id="connector-header-{conn_safe}" onclick="toggleConnectorItem('{conn_safe}')">
+            charger_safe = _safe_id(f"{loc}::{charger}")
+            html.append(
+                f"""
+      <div class="charger-section">
+        <div class="charger-header collapsed" id="connector-charger-header-{charger_safe}" onclick="toggleConnectorCharger('{charger_safe}')">
           <span class="toggle-icon">▶</span>
-          <strong>Connector: {conn_id} (Charger: {charger})</strong>
-          <span class="session-count">Total Power: <span id="connector-power-{conn_safe}">0.0</span> kW</span>
+          <strong>Charger: {charger}</strong>
+          <span class="session-count">Total Power: <span id="connector-charger-power-{charger_safe}">0.0</span> kW</span>
         </div>
-        <div class="connector-content hidden" id="connector-content-{conn_safe}">
+        <div class="charger-content hidden" id="connector-charger-content-{charger_safe}">
           <table>
             <thead>
               <tr>
+                <th>Connector</th>
                 <th>Status</th>
                 <th>Charging Bus</th>
                 <th>Connector Power (kW)</th>
@@ -162,19 +180,31 @@ def generate_connector_status_section(sim: Any, laadinfra_log: List[Dict[str, An
               </tr>
             </thead>
             <tbody>
+"""
+            )
+            for key in grouped[loc][charger]:
+                meta = connector_meta[key]
+                conn_id = meta["connector_id"]
+                html.append(
+                    f"""
               <tr data-connector-key="{key}">
+                <td>{conn_id}</td>
                 <td class="status-cell">-</td>
                 <td class="bus-cell">-</td>
                 <td class="power-cell">-</td>
                 <td class="charger-total-cell">-</td>
                 <td class="location-total-cell">-</td>
               </tr>
+"""
+                )
+            html.append(
+                """
             </tbody>
           </table>
         </div>
       </div>
 """
-                )
+            )
         html.append("""
     </div>
   </div>
@@ -216,9 +246,9 @@ function toggleConnectorLocation(locSafe) {
   content.classList.toggle('hidden');
 }
 
-function toggleConnectorItem(connSafe) {
-  const header = document.getElementById('connector-header-' + connSafe);
-  const content = document.getElementById('connector-content-' + connSafe);
+function toggleConnectorCharger(chargerSafe) {
+  const header = document.getElementById('connector-charger-header-' + chargerSafe);
+  const content = document.getElementById('connector-charger-content-' + chargerSafe);
   if (!header || !content) return;
   header.classList.toggle('collapsed');
   content.classList.toggle('hidden');
@@ -238,7 +268,18 @@ function renderConnectorStatus(index) {
       el.textContent = v.toFixed(1);
     }
   });
+  Object.entries(connectorStatusData.chargerTotal).forEach(([locId, byCharger]) => {
+    Object.entries(byCharger).forEach(([chargerId, byIdx]) => {
+      const id = 'connector-charger-power-' + (locId + '::' + chargerId).replaceAll(' ', '-').replaceAll(':', '-').replaceAll('/', '-');
+      const el = document.getElementById(id);
+      if (el) {
+        const v = byIdx[index] !== undefined ? Number(byIdx[index]) : 0.0;
+        el.textContent = v.toFixed(1);
+      }
+    });
+  });
   Object.entries(connectorStatusData.connectorTotal).forEach(([key, byIdx]) => {
+    // Keep connector total in data model; table rows already show this value.
     const id = 'connector-power-' + key.replaceAll(' ', '-').replaceAll(':', '-').replaceAll('/', '-');
     const el = document.getElementById(id);
     if (el) {

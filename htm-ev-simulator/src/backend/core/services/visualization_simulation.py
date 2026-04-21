@@ -96,6 +96,7 @@ class VisualizationSimulationService:
     simulation_start_timestamp: float | None = None
     simulation_end_timestamp: float | None = None
     _garage_point: PointInSequence | None = field(default=None, init=False, repr=False)
+    _location_time_power_allocations: dict[tuple[str, float], float] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """
@@ -114,6 +115,7 @@ class VisualizationSimulationService:
         self.strategy_flags = merged
 
     def run(self, world: World) -> VisualizationSimulationResult:
+        self._location_time_power_allocations = {}
         buses = sorted(world.buses_by_vehicle_number.values(), key=lambda b: b.vehicle_number)
         all_blocks = sorted(
             world.blocks_by_id.values(),
@@ -476,103 +478,72 @@ class VisualizationSimulationService:
         while True:
             if deadline_time_ts is not None and current_time + self.charging_step_seconds > deadline_time_ts:
                 break
-            charging_pairs = self._collect_connected_buses_at_location(location)
-            if not charging_pairs:
+            if bus.soc_percent >= 100.0:
+                break
+            desired_kw = bus.calculate_actual_charging_power_kw(offered_power_kw)
+            if desired_kw <= 0.0:
+                connector.current_power_kw = 0.0
+                connector.set_connected()
                 break
 
-            desired_power_by_bus: dict[str, float] = {}
-            connector_by_bus: dict[str, Connector] = {}
-            for charging_bus, charging_connector, charging_offered_kw in charging_pairs:
-                if charging_bus.soc_percent >= 100.0:
-                    charging_connector.current_power_kw = 0.0
-                    continue
-                charging_connector.set_charging()
-                desired_power_by_bus[charging_bus.vin_number] = charging_bus.calculate_actual_charging_power_kw(charging_offered_kw)
-                connector_by_bus[charging_bus.vin_number] = charging_connector
-                charging_connector.offered_power_kw = charging_offered_kw
-
-            total_desired_kw = sum(desired_power_by_bus.values())
-            if total_desired_kw <= 0.0:
-                break
-
-            power_limit_kw = self._location_power_limit_kw(location, current_time)
+            next_time = current_time + self.charging_step_seconds
+            power_limit_kw = self._location_power_limit_kw(location, next_time)
             if power_limit_kw == float("inf"):
-                for charging_bus, _, _ in charging_pairs:
-                    vin = charging_bus.vin_number
-                    desired_kw = desired_power_by_bus.get(vin, 0.0)
-                    connector_for_bus = connector_by_bus.get(vin)
-                    if connector_for_bus is not None:
-                        connector_for_bus.current_power_kw = desired_kw
-                        if desired_kw > 0.0:
-                            connector_for_bus.set_charging()
-                        else:
-                            connector_for_bus.set_connected()
-                    if desired_kw > 0.0:
-                        delta_kwh = desired_kw * (self.charging_step_seconds / 3600.0)
-                        charging_bus.update_soc(delta_kwh)
+                actual_power_kw = desired_kw
             else:
-                # Queue-based allocation under hard location cap (Telexstraat):
-                # connectors receive power in deterministic order until cap is exhausted.
-                remaining_kw = max(0.0, float(power_limit_kw))
-                ordered = sorted(
-                    charging_pairs,
-                    key=lambda x: (
-                        self._find_charger_id_for_connector(location, x[1]) or "",
-                        x[1].connector_id,
-                        x[0].vehicle_number,
-                    ),
-                )
-                for charging_bus, _, _ in ordered:
-                    vin = charging_bus.vin_number
-                    desired_kw = desired_power_by_bus.get(vin, 0.0)
-                    actual_power_kw = min(desired_kw, remaining_kw)
-                    remaining_kw = max(0.0, remaining_kw - actual_power_kw)
-                    connector_for_bus = connector_by_bus.get(vin)
-                    if connector_for_bus is not None:
-                        connector_for_bus.current_power_kw = actual_power_kw
-                        if actual_power_kw > 0.0:
-                            connector_for_bus.set_charging()
-                        else:
-                            # Stays connected but waits in queue.
-                            connector_for_bus.set_connected()
-                    if actual_power_kw > 0.0:
-                        delta_kwh = actual_power_kw * (self.charging_step_seconds / 3600.0)
-                        charging_bus.update_soc(delta_kwh)
+                # Location-level hard cap: remaining capacity after all *other* connectors.
+                current_load_kw = self._location_current_load_kw(location)
+                own_prev_kw = float(connector.current_power_kw)
+                other_load_kw = max(0.0, current_load_kw - own_prev_kw)
+                remaining_for_this_connector_kw = max(0.0, float(power_limit_kw) - other_load_kw)
+                actual_power_kw = min(desired_kw, remaining_for_this_connector_kw)
 
-            current_time += self.charging_step_seconds
+            if power_limit_kw != float("inf"):
+                # Global per-location per-timestamp budget guard to prevent
+                # multiple charging loops from exceeding the same time-slot cap.
+                budget_key = (str(location.location_id), float(next_time))
+                already_allocated = float(self._location_time_power_allocations.get(budget_key, 0.0))
+                remaining_budget_kw = max(0.0, float(power_limit_kw) - already_allocated)
+                actual_power_kw = min(actual_power_kw, remaining_budget_kw)
+                self._location_time_power_allocations[budget_key] = already_allocated + actual_power_kw
+
+            connector.current_power_kw = actual_power_kw
+            connector.offered_power_kw = offered_power_kw
+            if actual_power_kw > 0.0:
+                connector.set_charging()
+                delta_kwh = actual_power_kw * (self.charging_step_seconds / 3600.0)
+                bus.update_soc(delta_kwh)
+            else:
+                # Stays connected but receives no power (queue/wait).
+                connector.set_connected()
+
+            current_time = next_time
             location_total_power_kw = self._location_current_load_kw(location)
-
-            for charging_bus, _, _ in charging_pairs:
-                vin = charging_bus.vin_number
-                actual_power_kw = connector_by_bus.get(vin).current_power_kw if vin in connector_by_bus else 0.0
-                charging_connector = connector_by_bus.get(vin)
-                if charging_connector is None:
-                    continue
-                logger.laadinfra_log.append(
-                    {
-                        "event": "charging_progress",
-                        "time": current_time,
-                        "bus_vin": charging_bus.vin_number,
-                        "bus_number": charging_bus.vehicle_number,
-                        "location_id": location.location_id,
-                        "charger_id": self._find_charger_id_for_connector(location, charging_connector) or charger_id,
-                        "connector_id": charging_connector.connector_id,
-                        "soc_percent": charging_bus.soc_percent,
-                        "power_kw": actual_power_kw,
-                        "location_total_power_kw": location_total_power_kw,
-                        "strategy_name": strategy_name if charging_bus is bus else "CONNECTED_IDLE_TOP_OFF",
-                        "connector_status": charging_connector.status,
-                    }
-                )
-                logger.bus_log.append(
-                    {
-                        "event": "soc_update",
-                        "time": current_time,
-                        "bus_vin": charging_bus.vin_number,
-                        "bus_number": charging_bus.vehicle_number,
-                        "soc_percent": charging_bus.soc_percent,
-                    }
-                )
+            logger.laadinfra_log.append(
+                {
+                    "event": "charging_progress",
+                    "time": current_time,
+                    "bus_vin": bus.vin_number,
+                    "bus_number": bus.vehicle_number,
+                    "location_id": location.location_id,
+                    "charger_id": charger_id,
+                    "connector_id": connector_id,
+                    "soc_percent": bus.soc_percent,
+                    "power_kw": actual_power_kw,
+                    "location_total_power_kw": location_total_power_kw,
+                    "strategy_name": strategy_name,
+                    "connector_status": connector.status,
+                }
+            )
+            logger.bus_log.append(
+                {
+                    "event": "soc_update",
+                    "time": current_time,
+                    "bus_vin": bus.vin_number,
+                    "bus_number": bus.vehicle_number,
+                    "soc_percent": bus.soc_percent,
+                }
+            )
 
             if (not reached_target_soc) and bus.soc_percent >= effective_target_soc:
                 reached_target_soc = True
@@ -880,6 +851,9 @@ class VisualizationSimulationService:
         point_id = str(getattr(location, "point_id", ""))
         if point_id not in {"30002", "3002"} and "telexstraat" not in loc_id:
             return float("inf")
+        location_profile = getattr(location, "max_power_profile", None)
+        if callable(location_profile):
+            return float(location_profile(datetime.fromtimestamp(current_time_ts)))
         grid = getattr(location, "grid", None)
         if grid is None:
             return float("inf")

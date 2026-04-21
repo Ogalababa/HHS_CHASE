@@ -40,8 +40,7 @@ def generate_bus_status_section(
     # Create a mapping of bus_vin to bus_number for easy lookup
     bus_vin_to_number = {bus.vin_number: bus.vehicle_number for bus in all_buses}
     
-    # Build timeline of bus states within simulation window.
-    # We'll sample at regular intervals (every 5 minutes)
+    # Build timeline of bus states within simulation window using real event timestamps.
     sim_start_time = getattr(sim, "simulation_start_time", None)
     sim_end_time = getattr(sim, "simulation_end_time", None)
     if sim_start_time is None:
@@ -49,17 +48,12 @@ def generate_bus_status_section(
         if bus_log:
             sim_start_time = min(log.get('time', sim_start_time) for log in bus_log)
     
-    # Sample every 5 minutes
-    timeline_points = []
-    current_time = sim_start_time
-    sample_interval = 5 * 60  # 5 minutes in seconds
-    
     # Find simulation end time
     if sim_end_time is None:
         if bus_log:
-            sim_end_time = max(log.get('time', current_time) for log in bus_log)
+            sim_end_time = max(log.get('time', sim_start_time) for log in bus_log)
         else:
-            sim_end_time = current_time + 24 * 3600  # Default to 24 hours
+            sim_end_time = sim_start_time + 24 * 3600  # Default to 24 hours
     
     # Build state timeline for each bus
     bus_states_timeline = defaultdict(dict)  # {bus_vin: {time: state}}
@@ -171,10 +165,24 @@ def generate_bus_status_section(
             # Block completed - clear assignment after this time
             bus_assigned_blocks[bus_vin][time] = None
     
-    # Generate timeline points (every 5 minutes)
-    while current_time <= float(sim_end_time):
-        timeline_points.append(current_time)
-        current_time += sample_interval
+    # Generate timeline points from real logs (bus + planning + laadinfra).
+    timeline_set = set()
+    for log in bus_log:
+        t = log.get('time')
+        if t is not None and float(sim_start_time) <= float(t) <= float(sim_end_time):
+            timeline_set.add(float(t))
+    for log in planning_log:
+        t = log.get('time')
+        if t is not None and float(sim_start_time) <= float(t) <= float(sim_end_time):
+            timeline_set.add(float(t))
+    if laadinfra_log:
+        for log in laadinfra_log:
+            t = log.get('time')
+            if t is not None and float(sim_start_time) <= float(t) <= float(sim_end_time):
+                timeline_set.add(float(t))
+    timeline_set.add(float(sim_start_time))
+    timeline_set.add(float(sim_end_time))
+    timeline_points = sorted(timeline_set)
     
     # Build HTML table
     html_parts = []
@@ -182,14 +190,14 @@ def generate_bus_status_section(
     <div class="bus-status-section">
         <h2>Bus Status Over Time</h2>
         <p>Total Buses: {bus_count}</p>
-        <p>Time interval: 5 minutes</p>
+        <p>Time axis: real event timestamps</p>
         
         <div style="margin: 1rem 0; display: flex; gap: 2rem; align-items: center; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 300px;">
                 <label for="time-slider">Time: </label>
                 <input type="range" id="time-slider" min="0" max="{len(timeline_points) - 1}" value="0" 
                        style="width: 60%; margin: 0 1rem;">
-                <span id="current-time-display">{datetime.fromtimestamp(timeline_points[0] if timeline_points else 0).strftime('%Y-%m-%d %H:%M')}</span>
+                <span id="current-time-display">{datetime.fromtimestamp(timeline_points[0] if timeline_points else 0).strftime('%Y-%m-%d %H:%M:%S')}</span>
             </div>
             <div style="flex: 0 0 auto;">
                 <button id="play-pause-btn" onclick="togglePlayPause()" style="padding: 8px 16px; font-size: 1rem; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px;">
@@ -262,7 +270,7 @@ def generate_bus_status_section(
     
     # Add timeline data as JSON
     import json
-    timeline_json = json.dumps([datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M') for t in timeline_points])
+    timeline_json = json.dumps([datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M:%S') for t in timeline_points])
     html_parts.append(f"{timeline_json},\n")
     
     html_parts.append("""
