@@ -496,21 +496,48 @@ class VisualizationSimulationService:
                 break
 
             power_limit_kw = self._location_power_limit_kw(location, current_time)
-            if power_limit_kw == float("inf") or total_desired_kw <= power_limit_kw:
-                scale = 1.0
+            if power_limit_kw == float("inf"):
+                for charging_bus, _, _ in charging_pairs:
+                    vin = charging_bus.vin_number
+                    desired_kw = desired_power_by_bus.get(vin, 0.0)
+                    connector_for_bus = connector_by_bus.get(vin)
+                    if connector_for_bus is not None:
+                        connector_for_bus.current_power_kw = desired_kw
+                        if desired_kw > 0.0:
+                            connector_for_bus.set_charging()
+                        else:
+                            connector_for_bus.set_connected()
+                    if desired_kw > 0.0:
+                        delta_kwh = desired_kw * (self.charging_step_seconds / 3600.0)
+                        charging_bus.update_soc(delta_kwh)
             else:
-                scale = max(0.0, float(power_limit_kw) / float(total_desired_kw))
-
-            for charging_bus, _, _ in charging_pairs:
-                vin = charging_bus.vin_number
-                desired_kw = desired_power_by_bus.get(vin, 0.0)
-                actual_power_kw = desired_kw * scale
-                connector_for_bus = connector_by_bus.get(vin)
-                if connector_for_bus is not None:
-                    connector_for_bus.current_power_kw = actual_power_kw
-                if actual_power_kw > 0.0:
-                    delta_kwh = actual_power_kw * (self.charging_step_seconds / 3600.0)
-                    charging_bus.update_soc(delta_kwh)
+                # Queue-based allocation under hard location cap (Telexstraat):
+                # connectors receive power in deterministic order until cap is exhausted.
+                remaining_kw = max(0.0, float(power_limit_kw))
+                ordered = sorted(
+                    charging_pairs,
+                    key=lambda x: (
+                        self._find_charger_id_for_connector(location, x[1]) or "",
+                        x[1].connector_id,
+                        x[0].vehicle_number,
+                    ),
+                )
+                for charging_bus, _, _ in ordered:
+                    vin = charging_bus.vin_number
+                    desired_kw = desired_power_by_bus.get(vin, 0.0)
+                    actual_power_kw = min(desired_kw, remaining_kw)
+                    remaining_kw = max(0.0, remaining_kw - actual_power_kw)
+                    connector_for_bus = connector_by_bus.get(vin)
+                    if connector_for_bus is not None:
+                        connector_for_bus.current_power_kw = actual_power_kw
+                        if actual_power_kw > 0.0:
+                            connector_for_bus.set_charging()
+                        else:
+                            # Stays connected but waits in queue.
+                            connector_for_bus.set_connected()
+                    if actual_power_kw > 0.0:
+                        delta_kwh = actual_power_kw * (self.charging_step_seconds / 3600.0)
+                        charging_bus.update_soc(delta_kwh)
 
             current_time += self.charging_step_seconds
             location_total_power_kw = self._location_current_load_kw(location)
@@ -849,7 +876,9 @@ class VisualizationSimulationService:
         """
         if not bool(self.strategy_flags.get("power_limit", False)):
             return float("inf")
-        if str(getattr(location, "point_id", "")) not in {"30002", "3002"}:
+        loc_id = str(getattr(location, "location_id", "")).lower()
+        point_id = str(getattr(location, "point_id", ""))
+        if point_id not in {"30002", "3002"} and "telexstraat" not in loc_id:
             return float("inf")
         grid = getattr(location, "grid", None)
         if grid is None:
