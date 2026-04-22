@@ -17,15 +17,50 @@ class PrecheckReplacementStrategy:
     def __init__(self) -> None:
         self._replacement_counter = 0
 
+    @staticmethod
+    def _is_garage_return_journey(state: StrategyRuntimeState) -> bool:
+        """
+        True when journey destination is Garage Telexstraat (30002).
+
+        Rationale: return-to-garage legs should not trigger replacement dispatch.
+        This avoids unnecessary bus swaps near end-of-duty charging flows.
+        """
+        if not state.journey.points:
+            return False
+        last_point = state.journey.points[-1]
+        return str(getattr(last_point, "point_id", "")) == "30002"
+
+    @staticmethod
+    def _same_vehicle_series(a_number: int, b_number: int) -> bool:
+        """
+        Enforce replacement inside same number series (e.g., 14xx -> 14xx).
+        """
+        return int(a_number) // 100 == int(b_number) // 100
+
     def before_journey(self, service, state: StrategyRuntimeState) -> None:
+        # Rule 1: If journey ends at Garage Telexstraat (30002), skip replacement.
+        if self._is_garage_return_journey(state):
+            return
+
         if service._can_complete_journey(state.active_bus, state.journey):
             return
+
+        # Rule 2: replacement must be same bus type and same series (14xx/15xx).
+        candidates = [
+            b
+            for b in state.buses
+            if b.vin_number != state.active_bus.vin_number
+            and b.vehicle_type == state.active_bus.vehicle_type
+            and self._same_vehicle_series(b.vehicle_number, state.active_bus.vehicle_number)
+        ]
+        if not candidates:
+            return
+
         self._replacement_counter += 1
         replacement_bus = service._select_bus_for_time(
-            state.buses,
+            candidates,
             state.bus_available_at,
             state.assign_time,
-            exclude_vin=state.active_bus.vin_number,
             required_vehicle_type=state.active_bus.vehicle_type,
         )
         if replacement_bus.vin_number == state.active_bus.vin_number:

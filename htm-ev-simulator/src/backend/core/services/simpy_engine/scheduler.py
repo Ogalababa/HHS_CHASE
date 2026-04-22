@@ -92,6 +92,15 @@ class SimpyScheduler:
         return point
 
     @staticmethod
+    def _is_garage_destination_journey(journey: Journey) -> bool:
+        """
+        True when journey destination is Garage Telexstraat (30002).
+        """
+        if not journey.points:
+            return False
+        return str(getattr(journey.points[-1], "point_id", "")) == "30002"
+
+    @staticmethod
     def _release_bus_connector(bus: Bus) -> None:
         loc = getattr(bus, "location", None)
         charging_loc = getattr(loc, "charging_location", None) if loc is not None else None
@@ -134,6 +143,9 @@ class SimpyScheduler:
         return sorted(candidates, key=lambda b: (bus_available_at.get(b.vin_number, 0.0), b.vehicle_number))[0]
 
     def _can_complete_journey(self, bus: Bus, journey: Journey) -> bool:
+        # Business rule: garage-return journeys ignore SOC gate.
+        if self._is_garage_destination_journey(journey):
+            return True
         required_kwh = 0.0
         for point in journey.points:
             if point.distance_to_next_m:
@@ -414,7 +426,10 @@ class SimpyScheduler:
                     "location": self._point_to_location(point),
                 }
             )
-            if bus.soc_percent < self.low_soc_alert_threshold_percent:
+            if (
+                bus.soc_percent < self.low_soc_alert_threshold_percent
+                and not self._is_garage_destination_journey(journey)
+            ):
                 self.logger.planning_log.append(
                     {
                         "event": "journey_skipped",

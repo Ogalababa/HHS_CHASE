@@ -703,7 +703,7 @@ def generate_breakdown_table_body(
             elif event_type == 'journey_end':
                 blocks_data[block_id]['journeys'][journey_id]['journey_end_time'] = log.get('time')
                 blocks_data[block_id]['block_end_time'] = log.get('time')
-            elif event_type == 'journey_skipped_low_soc':
+            elif event_type in {'journey_skipped_low_soc', 'journey_skipped'}:
                 # Mark journey as skipped
                 blocks_data[block_id]['journeys'][journey_id]['skipped'] = True
                 blocks_data[block_id]['journeys'][journey_id]['skip_time'] = log.get('time')
@@ -860,6 +860,22 @@ def generate_breakdown_table_body(
             block_data['journeys'].items(),
             key=lambda x: x[1]['journey_start_time'] if x[1]['journey_start_time'] is not None else float('inf')
         )
+        # If a journey is skipped due to low SOC during execution, downstream
+        # journeys in the same block that never started should be marked skipped
+        # (not "not started"), because the block was interrupted.
+        downstream_interrupted = False
+        for _jid, jdata in sorted_journeys:
+            if jdata.get('skipped'):
+                downstream_interrupted = True
+                continue
+            if (
+                downstream_interrupted
+                and jdata.get('journey_start_time') is None
+                and not jdata.get('points')
+            ):
+                jdata['skipped'] = True
+                jdata['skip_reason'] = 'Low SOC interruption in previous journey'
+                jdata['skip_time'] = None
         
         # Find the first SOC in the block (from the first point of the first journey)
         # This represents "SOC at Arrival" - the SOC when the block starts
@@ -1014,7 +1030,11 @@ def generate_breakdown_table_body(
         )
         has_journey_skipped = any(j.get('skipped', False) for _, j in sorted_journeys)
         has_not_started = any(
-            (j.get('journey_end_time') is None) and (not j.get('skipped', False))
+            # Treat as not-started only when there is no completion marker AND
+            # no point-level execution evidence.
+            (j.get('journey_end_time') is None)
+            and (not j.get('skipped', False))
+            and (not j.get('points'))
             for _, j in sorted_journeys
         )
         block_labels: list[str] = []
