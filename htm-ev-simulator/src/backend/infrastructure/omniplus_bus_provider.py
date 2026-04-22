@@ -28,6 +28,7 @@ class OmniplusBusProvider(BusProviderPort):
     client: OmniplusOnClient
     vins: list[str]
     vin_to_vehicle_number: Optional[dict[str, int]] = None
+    default_battery_capacity_kwh: float = 352.8
 
     def get_buses(self) -> list[Bus]:
         raw_by_vin = self.client.get_latest_signals(self.vins)
@@ -44,6 +45,22 @@ class OmniplusBusProvider(BusProviderPort):
             mom_charge_energy = _to_float(raw.get("MomChargeEnergy"))
             mom_discharge_energy = _to_float(raw.get("MomDischargeEnergy"))
             avg_cons = _to_float(raw.get("AverageEnergyConsumption"))
+            explicit_capacity = _to_float(raw.get("BatteryCapacityKwh"))
+
+            capacity_kwh = explicit_capacity
+            if (
+                capacity_kwh is None
+                and not (
+                    mom_charge_energy is not None
+                    and mom_discharge_energy is not None
+                )
+                and not (
+                    mom_discharge_energy is not None
+                    and soc_disp_cval is not None
+                    and soc_disp_cval > 0
+                )
+            ):
+                capacity_kwh = float(self.default_battery_capacity_kwh)
 
             # Domain Bus requires either explicit capacity or enough fields to infer it.
             bus = Bus(
@@ -53,6 +70,7 @@ class OmniplusBusProvider(BusProviderPort):
                 state=BusState.AVAILABLE,
                 energy_consumption_per_km=float(avg_cons) if avg_cons is not None else 1.0,
                 soc_percent=float(soc_disp_cval) if soc_disp_cval is not None else 50.0,
+                battery_capacity_kwh=capacity_kwh,
                 mom_charge_energy=mom_charge_energy,
                 mom_discharge_energy=mom_discharge_energy,
                 soc_disp_cval=soc_disp_cval,

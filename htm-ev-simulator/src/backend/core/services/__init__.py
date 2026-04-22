@@ -12,10 +12,10 @@ from .simpy_charging_simulation import (
     ChargingTrace as SimpyChargingTrace,
     simulate_charging_soc_trace_simpy,
 )
+from .simpy_visualization_service import VisualizationSimulationService
 from .visualization_simulation import (
     ClassifiedLogger,
     VisualizationSimulationResult,
-    VisualizationSimulationService,
     VisualizationWorldView,
 )
 from .world_builder import WorldBuildResult, WorldBuilder

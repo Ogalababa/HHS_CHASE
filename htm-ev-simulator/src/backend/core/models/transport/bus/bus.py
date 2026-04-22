@@ -275,7 +275,6 @@ class Bus:
         p_actual = self.charging_curve.actual_battery_power_kw(
             soc_percent=self.soc_percent,
             charger_offered_power_kw=charger_offered_power_kw,
-            charging_loss_kw=self.charging_loss_kw,
         )
         if self.max_charging_power_kw is not None:
             return min(float(p_actual), float(self.max_charging_power_kw))

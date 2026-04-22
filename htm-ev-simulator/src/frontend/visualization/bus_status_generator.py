@@ -121,6 +121,11 @@ def generate_bus_status_section(
                         bus_power_timeline[bus_vin][time] = power_kw
                     elif event_type == 'charging_progress':
                         bus_power_timeline[bus_vin][time] = power_kw
+                # CRITICAL: when charging stops at the same timestamp as last progress,
+                # force power to 0 and status to CONNECTED for correct live display.
+                if event_type == 'charging_stopped':
+                    bus_power_timeline[bus_vin][time] = 0.0
+                    bus_connector_status_timeline[bus_vin][time] = 'CONNECTED'
 
                 # Track connector_id when charging starts or progresses
                 if event_type == 'charging_started':
@@ -183,6 +188,10 @@ def generate_bus_status_section(
     timeline_set.add(float(sim_start_time))
     timeline_set.add(float(sim_end_time))
     timeline_points = sorted(timeline_set)
+    # Guard frontend responsiveness on long/high-frequency simulations.
+    # Rationale: this section serializes per-bus status over all time points into
+    # inlined JS. Extremely dense timelines can freeze the browser.
+    timeline_points = _downsample_timeline(timeline_points, max_points=800)
     
     # Build HTML table
     html_parts = []
@@ -681,3 +690,21 @@ def generate_bus_status_section(
 """)
     
     return ''.join(html_parts)
+
+
+def _downsample_timeline(timeline_points: List[float], max_points: int = 800) -> List[float]:
+    """
+    Downsample timeline while preserving first/last points.
+
+    Rationale: Keep interaction smooth in browser without changing report schema.
+    """
+    if len(timeline_points) <= max_points:
+        return timeline_points
+    if max_points < 2:
+        return [timeline_points[0], timeline_points[-1]]
+    span = len(timeline_points) - 1
+    selected_indices = {0, span}
+    for i in range(1, max_points - 1):
+        idx = round(i * span / (max_points - 1))
+        selected_indices.add(idx)
+    return [timeline_points[i] for i in sorted(selected_indices)]

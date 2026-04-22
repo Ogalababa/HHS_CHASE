@@ -32,7 +32,7 @@ from backend.core.models.planning.point_in_sequence import PointInSequence
 from backend.core.models.transport.bus import Bus, BusState
 from backend.core.ports.bus_port import BusProviderPort
 from backend.core.ports.planning_port import PlanningProviderPort
-from backend.core.services.visualization_simulation import VisualizationSimulationService
+from backend.core.services.simpy_visualization_service import VisualizationSimulationService
 from backend.core.services.world_builder import WorldBuilder
 from backend.infrastructure.bus_planning_parquet_provider import BusPlanningParquetProvider
 from backend.infrastructure.connector_json_infra_provider import ConnectorJsonInfrastructureProvider
