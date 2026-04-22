@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f8f9fa;
+            color: #212529;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background-color: #343a40;
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        h1 { margin: 0; font-size: 1.5rem; }
+
+        .tab-bar {
+            display: flex;
+            background-color: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .tab-link {
+            background-color: inherit;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 20px;
+            transition: 0.3s;
+            font-size: 1rem;
+            color: #495057;
+            font-weight: 500;
+        }
+        .tab-link:hover {
+            background-color: #dee2e6;
+        }
+        .tab-link.active {
+            background-color: #fff;
+            border-bottom: 3px solid #007bff;
+            color: #007bff;
+        }
+
+        .tab-content {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+        }
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Map tab - full height */
+        #Map {
+            padding: 0;
+            height: 100%;
+        }
+        #Map iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* Detailed Report tab styles */
+        #DetailedReport {
+            padding: 2rem;
+            overflow: auto;
+        }
+        .block-section {
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .block-header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px;
+            cursor: pointer;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .block-header:hover {
+            background-color: #45a049;
+        }
+        .block-header::after {
+            content: '▼';
+            font-size: 12px;
+            transition: transform 0.3s;
+        }
+        .block-header.collapsed::after {
+            transform: rotate(-90deg);
+        }
+        .block-content {
+            padding: 15px;
+            display: none;
+        }
+        .block-content.expanded {
+            display: block;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .journey-row {
+            background-color: #e8f5e9;
+        }
+        .point-row {
+            background-color: #f1f8e9;
+        }
+    </style>
+    <script>
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+                tabcontent[i].classList.remove("active");
+            }
+            tablinks = document.getElementsByClassName("tab-link");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "flex";
+            document.getElementById(tabName).classList.add("active");
+            evt.currentTarget.className += " active";
+        }
+
+        function toggleBlock(blockId) {
+            const content = document.getElementById('content-' + blockId);
+            const header = document.getElementById('header-' + blockId);
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                header.classList.add('collapsed');
+            } else {
+                content.classList.add('expanded');
+                header.classList.remove('collapsed');
+            }
+        }
+    </script>
+</head>
+<body>
+    <header>
+        <h1>{{ title }}</h1>
+        <span>Simulation stopped at: {{ sim_stop_time }}</span>
+    </header>
+
+    <div class="tab-bar">
+        <button class="tab-link active" onclick="openTab(event, 'Map')">Realtime Kaart</button>
+        <button class="tab-link" onclick="openTab(event, 'DetailedReport')">Detailed Report</button>
+    </div>
+
+    <div id="Map" class="tab-content active">
+        <iframe src="{{ map_filename }}"></iframe>
+    </div>
+
+    <div id="DetailedReport" class="tab-content">
+        <h2>Bus Taak Details (Gegroepeerd per Block ID)</h2>
+        {{ detailed_report_content }}
+    </div>
+</body>
+</html>

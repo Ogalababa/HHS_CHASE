@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 2em;
+            background-color: #f8f9fa;
+            color: #212529;
+        }
+        h1, h2 {
+            color: #343a40;
+            border-bottom: 2px solid #dee2e6;
+            padding-bottom: 0.5em;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 1em;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+        }
+        th, td {
+            border: 1px solid #dee2e6;
+            padding: 12px 15px;
+            text-align: left;
+            vertical-align: middle;
+        }
+        th {
+            background-color: #e9ecef;
+            font-weight: 600;
+        }
+        .toggle {
+            cursor: pointer;
+            user-select: none;
+        }
+        .toggle .icon {
+            display: inline-block;
+            width: 1em;
+            transition: transform 0.2s ease-in-out;
+        }
+        .expanded > .toggle .icon {
+            transform: rotate(90deg);
+        }
+        .block-row > td {
+            font-weight: bold;
+            background-color: #f1f3f5;
+        }
+        .journey-row > td {
+            background-color: #f8f9fa;
+        }
+        .point-row > td {
+            border-left: 3px solid #ced4da;
+        }
+        .indent-1 { padding-left: 2em !important; }
+        .indent-2 { padding-left: 4em !important; }
+        .hidden { display: none; }
+    </style>
+    <script>
+        function toggleVisibility(rowId) {
+            const headerRow = document.getElementById(rowId);
+            if (!headerRow) return;
+
+            headerRow.classList.toggle('expanded');
+            const isExpanded = headerRow.classList.contains('expanded');
+
+            const children = document.querySelectorAll(`[data-parent-id="${rowId}"]`);
+            children.forEach(child => {
+                child.classList.toggle('hidden', !isExpanded);
+                if (!isExpanded && child.classList.contains('expanded')) {
+                    toggleVisibility(child.id);
+                }
+            });
+        }
+    </script>
+</head>
+<body>
+    <h1>{{ title }}</h1>
+    <p>Simulation stopped at: {{ sim_stop_time }}</p>
+
+    <h2>Summary</h2>
+    {{ summary_section }}
+
+    <h2>Simulation Breakdown</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ID (Block / Journey / Point)</th>
+                <th>Distance (km)</th>
+                <th>Start Time (Sim)</th>
+                <th>End Time (Sim)</th>
+                <th>Assigned Bus Nr.</th>
+                <th>SOC at Arrival (%)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ breakdown_table_body }}
+        </tbody>
+    </table>
+</body>
+</html>

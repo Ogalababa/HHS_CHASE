@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Orbitron', sans-serif;
+            background-color: #0a0a1a;
+            color: #00ffcc;
+            margin: 2em;
+            text-shadow: 0 0 5px #00ffcc;
+        }
+        h1, h2 {
+            color: #ffffff;
+            border-bottom: 2px solid #00ffcc;
+            padding-bottom: 0.5em;
+            text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 1em;
+            box-shadow: 0 0 15px #00ffcc;
+            border: 1px solid #00ffcc;
+        }
+        th, td {
+            border: 1px solid #005544;
+            padding: 12px 15px;
+            text-align: left;
+            vertical-align: middle;
+        }
+        th {
+            background-color: #00221a;
+            font-weight: 700;
+            color: #ffffff;
+        }
+        .toggle { cursor: pointer; user-select: none; }
+        .toggle .icon {
+            display: inline-block;
+            width: 1em;
+            transition: transform 0.2s ease-in-out;
+            color: #ff00ff; /* Neon pink for icons */
+        }
+        .expanded > .toggle .icon { transform: rotate(90deg); }
+        .block-row > td {
+            font-weight: bold;
+            background-color: #00332a;
+            color: #ffffff;
+        }
+        .journey-row > td {
+            background-color: #00221a;
+        }
+        .point-row > td {
+            border-left: 3px solid #00ffcc;
+        }
+        .indent-1 { padding-left: 2em !important; }
+        .indent-2 { padding-left: 4em !important; }
+        .hidden { display: none; }
+    </style>
+    <script>
+        function toggleVisibility(rowId) {
+            const headerRow = document.getElementById(rowId);
+            if (!headerRow) return;
+
+            headerRow.classList.toggle('expanded');
+            const isExpanded = headerRow.classList.contains('expanded');
+
+            const children = document.querySelectorAll(`[data-parent-id="${rowId}"]`);
+            children.forEach(child => {
+                child.classList.toggle('hidden', !isExpanded);
+                if (!isExpanded && child.classList.contains('expanded')) {
+                    toggleVisibility(child.id);
+                }
+            });
+        }
+    </script>
+</head>
+<body>
+    <h1>{{ title }}</h1>
+    <p>Simulation stopped at: {{ sim_stop_time }}</p>
+
+    <h2>Summary</h2>
+    {{ summary_section }}
+
+    <h2>Simulation Breakdown</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ID (Block / Journey / Point)</th>
+                <th>Distance (km)</th>
+                <th>Start Time (Sim)</th>
+                <th>End Time (Sim)</th>
+                <th>Assigned Bus Nr.</th>
+                <th>SOC at Arrival (%)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ breakdown_table_body }}
+        </tbody>
+    </table>
+</body>
+</html>

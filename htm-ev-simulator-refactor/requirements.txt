@@ -1,0 +1,4 @@
+simpy
+fastapi
+uvicorn
+
