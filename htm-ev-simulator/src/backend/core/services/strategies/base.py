@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .simulation_strategy_host import SimulationStrategyHost
+
 from ...models.planning.block import Block
 from ...models.planning.journey import Journey
 from ...models.transport.bus.bus import Bus
@@ -49,9 +51,9 @@ class SimulationStrategy(Protocol):
 
     strategy_key: str
 
-    def before_journey(self, service: Any, state: StrategyRuntimeState) -> None:
+    def before_journey(self, service: SimulationStrategyHost, state: StrategyRuntimeState) -> None:
         """Executed before journey simulation."""
 
-    def after_journey(self, service: Any, state: StrategyRuntimeState) -> None:
+    def after_journey(self, service: SimulationStrategyHost, state: StrategyRuntimeState) -> None:
         """Executed after journey simulation."""
 

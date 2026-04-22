@@ -1,0 +1,262 @@
+@startuml htm-ev-simulator-class-diagram
+' HTM EV Simulator — class diagram derived from src/
+' Render: plantuml docs/plantuml/class_diagram.puml
+' https://plantuml.com/class-diagram
+
+skinparam packageStyle rectangle
+skinparam linetype ortho
+left to right direction
+
+title HTM EV Simulator — core class diagram (from codebase)
+
+package "domain.exceptions" <<Rectangle>> {
+  class WorldDomainError <<exception>>
+  class DuplicateEntityIdError <<exception>>
+  class EntityNotFoundError <<exception>>
+  WorldDomainError <|-- DuplicateEntityIdError
+  WorldDomainError <|-- EntityNotFoundError
+
+  class LaadInfraDomainError <<exception>>
+  class ConnectorOccupiedError <<exception>>
+  LaadInfraDomainError <|-- ConnectorOccupiedError
+}
+
+package "domain.world" <<Rectangle>> {
+  class World <<aggregate root>> {
+    +buses_by_vehicle_number: dict
+    +locations_by_id: dict
+    +grids_by_id: dict
+    +blocks_by_id: dict
+    --
+    +add_bus / add_location / add_grid / add_block
+    +attach_locations_to_points(...)
+  }
+}
+
+package "domain.planning" <<Rectangle>> {
+  class Block {
+    +block_id: str
+    +operating_day: date
+    +journeys: list
+  }
+  class Journey {
+    +journey_id: str
+    +points: list
+  }
+  class PointInSequence {
+    +point_id: str
+    +distance_to_next_m: float
+    +charging_location: Location
+  }
+  Block "1" *-- "many" Journey : journeys
+  Journey "1" *-- "many" PointInSequence : points
+}
+
+package "domain.transport.bus" <<Rectangle>> {
+  enum BusState {
+    AVAILABLE
+    RUNNING
+    CHARGING
+    MAINTENANCE
+  }
+  class ChargingCurve <<value object>> {
+    +stage_a_end_soc: float
+    +stage_b_end_soc: float
+    +a_base_kw: float
+    +a_slope_kw_per_soc: float
+    +b_start_kw: float
+    +b_slope_kw_per_soc: float
+    --
+    +power_cap_kw(soc_percent): float
+    +actual_battery_power_kw(...): float
+  }
+  class Bus <<entity>> {
+    +vehicle_number: int
+    +vin_number: str
+    +vehicle_type: str
+    +soc_percent: float
+    +battery_capacity_kwh: float
+    +energy_consumption_per_km: float
+    +state: BusState
+    +location: PointInSequence
+    --
+    +update_soc(...)
+    +calculate_actual_charging_power_kw(...)
+    +remaining_range_km()
+  }
+  Bus --> BusState
+  Bus --> ChargingCurve : default curve
+}
+
+package "domain.laad_infra" <<Rectangle>> {
+  class Grid {
+    +grid_id: str
+  }
+  class Location {
+    +location_id: str
+    +point_id: str
+    +chargers: dict
+    +grid: Grid
+  }
+  class Charger {
+    +charger_id: str
+    +connectors: list
+    +max_power_kw: float
+  }
+  class Connector {
+    +connector_id: str
+    +connected_bus: Bus
+    +current_power_kw: float
+  }
+  Location "1" *-- "many" Charger : chargers
+  Charger "1" *-- "many" Connector : connectors
+  Location --> Grid : optional
+}
+
+package "application.ports" <<Rectangle>> {
+  abstract class BusProviderPort <<port>> {
+    {abstract} +get_buses(): list~Bus~
+  }
+  abstract class PlanningProviderPort <<port>> {
+    {abstract} +get_blocks(): list~Block~
+  }
+  abstract class InfrastructureProviderPort <<port>> {
+    {abstract} +get_locations()
+    {abstract} +get_grids()
+    {abstract} +get_location_grid_links()
+  }
+}
+
+package "application.services" <<Rectangle>> {
+  class WorldBuildResult <<DTO>> {
+    +world: World
+    +n_buses: int
+    +n_blocks: int
+  }
+  class WorldBuilder <<service>> {
+    -_planning: PlanningProviderPort
+    -_infrastructure: InfrastructureProviderPort
+    -_buses: BusProviderPort
+    --
+    +build(): WorldBuildResult
+  }
+  WorldBuilder ..> PlanningProviderPort
+  WorldBuilder ..> InfrastructureProviderPort
+  WorldBuilder ..> BusProviderPort
+  WorldBuilder ..> World : constructs
+
+  class InternalEventLog <<DTO>> {
+    +bus_log: list
+    +planning_log: list
+    +laadinfra_log: list
+  }
+  class LocationPowerAllocator <<service>> {
+    +allocate_power_kw(...)
+    +apply_energy(...)
+  }
+  class SimpyScheduler <<service>> {
+    +world: World
+    +logger: InternalEventLog
+    +allocator: LocationPowerAllocator
+    +strategies: list
+    --
+    +run(env, blocks, buses)
+    +_simulate_journey(...)
+    +_maybe_charge(...)
+  }
+  SimpyScheduler *-- InternalEventLog
+  SimpyScheduler *-- LocationPowerAllocator
+  SimpyScheduler --> World
+
+  class "VisualizationSimulationService\n(simpy_visualization_service.py)" as SimPyVisualizationService <<service>> {
+    +strategy_flags: dict
+    --
+    +run(world): VisualizationSimulationResult
+  }
+  SimPyVisualizationService ..> SimpyScheduler : builds, env.process
+
+  class ClassifiedLogger <<DTO>>
+  class VisualizationWorldView <<DTO>>
+  class VisualizationSimulationResult <<DTO>> {
+    +world: VisualizationWorldView
+    +classified_logger: ClassifiedLogger
+  }
+  VisualizationSimulationResult *-- VisualizationWorldView
+  VisualizationSimulationResult *-- ClassifiedLogger
+}
+
+package "strategies" <<Rectangle>> {
+  class StrategyRuntimeState <<DTO>> {
+    +active_bus: Bus
+    +bus_available_at: dict
+    +block: Block
+    +journey: Journey
+    +logger: InternalEventLog
+  }
+  interface SimulationStrategy <<protocol>> {
+    +strategy_key: str
+    +before_journey(service, state)
+    +after_journey(service, state)
+  }
+  interface SimulationStrategyHost <<protocol>> {
+    +opportunity_charging_soc_threshold_percent
+    +charging_target_soc_percent
+    +low_soc_alert_threshold_percent
+    --
+    +_can_complete_journey(bus, journey): bool
+    +_select_bus_for_time(...): Bus
+    +_log_precheck_replacement(...)
+    +_maybe_charge(bus, start_ts, logger, **kw)
+  }
+  class PrecheckReplacementStrategy
+  class OpportunityChargingStrategy
+  class StartFullSocStrategy
+  class PowerLimitStrategy
+  PrecheckReplacementStrategy ..|> SimulationStrategy
+  OpportunityChargingStrategy ..|> SimulationStrategy
+  StartFullSocStrategy ..|> SimulationStrategy
+  PowerLimitStrategy ..|> SimulationStrategy
+  SimpyScheduler ..|> SimulationStrategyHost
+  SimpyScheduler o-- "0..*" SimulationStrategy : strategies
+  SimulationStrategy ..> SimulationStrategyHost : service param
+  SimulationStrategy ..> StrategyRuntimeState
+}
+
+package "infrastructure.adapters" <<Rectangle>> {
+  class OmniplusBusProvider <<adapter>>
+  class BusPlanningParquetProvider <<adapter>>
+  class ConnectorJsonInfrastructureProvider <<adapter>>
+  class MaximoAssetProvider <<helper>>
+  class OmniplusOnClient <<client>>
+  class DataLakeConfig <<DTO>>
+
+  OmniplusBusProvider ..|> BusProviderPort
+  BusPlanningParquetProvider ..|> PlanningProviderPort
+  ConnectorJsonInfrastructureProvider ..|> InfrastructureProviderPort
+  MaximoAssetProvider --> DataLakeConfig
+}
+
+package "frontend.visualization (excerpt)" <<Rectangle>> {
+  class DynamicBusSnapshot <<DTO>> {
+    +bus_vin: str
+    +time: float
+  }
+  note bottom of DynamicBusSnapshot
+    Report modules (classified_report_generator,
+    bus_status_generator, ...) are mostly
+    functions; this dataclass is representative.
+  end note
+}
+
+' --- aggregate wiring ---
+World "1" o-- "many" Bus
+World "1" o-- "many" Block
+World "1" o-- "many" Location
+World "1" o-- "many" Grid
+PointInSequence ..> Location : charging_location
+VisualizationWorldView ..> Block : read view
+VisualizationWorldView ..> Bus
+VisualizationWorldView ..> Location
+Connector ..> Bus : connected_bus
+
+@enduml
