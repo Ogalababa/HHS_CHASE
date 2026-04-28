@@ -33,6 +33,8 @@ class VisualizationSimulationService:
     charging_target_soc_percent: float = 85.0
     charging_step_seconds: int = 300
     enable_precheck_replacement_strategy: bool = False
+    enable_precheck_force_return_strategy: bool = False
+    enable_precheck_dispatch_replacement_strategy: bool = False
     enable_opportunity_charging_strategy: bool = False
     enable_start_full_soc_strategy: bool = False
     enable_power_limit_strategy: bool = False
@@ -45,7 +47,13 @@ class VisualizationSimulationService:
 
     def __post_init__(self) -> None:
         merged = {
-            "precheck_replacement": self.enable_precheck_replacement_strategy,
+            # Backward compatible umbrella flag: when enabled, turn on both split strategies.
+            "precheck_force_return": (
+                self.enable_precheck_force_return_strategy or self.enable_precheck_replacement_strategy
+            ),
+            "precheck_dispatch_replacement": (
+                self.enable_precheck_dispatch_replacement_strategy or self.enable_precheck_replacement_strategy
+            ),
             "opportunity_charging": self.enable_opportunity_charging_strategy,
             "start_full_soc": self.enable_start_full_soc_strategy,
             "power_limit": self.enable_power_limit_strategy,

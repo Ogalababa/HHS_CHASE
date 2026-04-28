@@ -201,7 +201,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--enable-precheck-replacement-strategy",
         action="store_true",
-        help="Before each journey, precheck SOC and trigger 8xxxxxx return + 9xxxxxx replacement dispatch when insufficient.",
+        help="(Deprecated umbrella) Enable both precheck force-return (8xxxxxx) and precheck replacement-dispatch (9xxxxxx).",
+    )
+    parser.add_argument(
+        "--enable-precheck-force-return-strategy",
+        action="store_true",
+        help="When precheck fails and no planned return exists, generate 8xxxxxx forced return journey to garage.",
+    )
+    parser.add_argument(
+        "--enable-precheck-dispatch-replacement-strategy",
+        action="store_true",
+        help="When precheck fails, generate 9xxxxxx replacement dispatch and swap to a suitable bus.",
     )
     parser.add_argument(
         "--enable-opportunity-charging-strategy",
@@ -402,6 +412,8 @@ def main() -> None:
         charging_target_soc_percent=args.charge_target_soc,
         charging_step_seconds=args.charge_step_seconds,
         enable_precheck_replacement_strategy=args.enable_precheck_replacement_strategy,
+        enable_precheck_force_return_strategy=args.enable_precheck_force_return_strategy,
+        enable_precheck_dispatch_replacement_strategy=args.enable_precheck_dispatch_replacement_strategy,
         enable_opportunity_charging_strategy=args.enable_opportunity_charging_strategy,
         enable_start_full_soc_strategy=args.enable_start_full_soc_strategy,
         enable_power_limit_strategy=args.enable_power_limit_strategy,

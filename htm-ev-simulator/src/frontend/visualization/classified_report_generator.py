@@ -1203,7 +1203,7 @@ def generate_breakdown_table_body(
             target_distance = explain_info.get('target_distance_km')
             target_distance_str = f"{target_distance:.2f}" if isinstance(target_distance, (int, float)) else "N/A"
             changed = bool(explain_info.get('changed_assignment'))
-            changed_label = "是（已改派）" if changed else "否（保持原分配）"
+            changed_label = "Yes (reassigned)" if changed else "No (kept original assignment)"
 
             candidates = explain_info.get('candidates') or []
             rendered_candidates_html: list[str] = []
@@ -1215,9 +1215,9 @@ def generate_breakdown_table_body(
                 if "score" in c:
                     score = c.get('score')
                     score_str = f"{score:.4f}" if isinstance(score, (int, float)) else "N/A"
-                    can_complete = "可完成" if c.get('can_complete') else "不可完成"
+                    can_complete = "can complete" if c.get('can_complete') else "cannot complete"
                     rendered_candidates_html.append(
-                        f"<li>{idx}. Bus <strong>{bus_nr}</strong> @ 点位 <code>{pid}</code>, SOC={soc_str}%, 评分={score_str}, {can_complete}</li>"
+                        f"<li>{idx}. Bus <strong>{bus_nr}</strong> @ point <code>{pid}</code>, SOC={soc_str}%, score={score_str}, {can_complete}</li>"
                     )
                 else:
                     delta = c.get('distance_delta_km')
@@ -1225,29 +1225,29 @@ def generate_breakdown_table_body(
                     base = c.get('baseline_distance_km')
                     base_str = f"{base:.2f}" if isinstance(base, (int, float)) else "N/A"
                     rendered_candidates_html.append(
-                        f"<li>{idx}. Bus <strong>{bus_nr}</strong> @ 点位 <code>{pid}</code>, SOC={soc_str}%, 距离偏差={delta_str}km, 基线距离={base_str}km</li>"
+                        f"<li>{idx}. Bus <strong>{bus_nr}</strong> @ point <code>{pid}</code>, SOC={soc_str}%, distance delta={delta_str}km, baseline distance={base_str}km</li>"
                     )
             if rendered_candidates_html:
                 candidates_html = "<ul style=\"margin: 6px 0 0 18px; padding: 0;\">" + "".join(rendered_candidates_html) + "</ul>"
             else:
-                candidates_html = "<span style=\"color:#666;\">无候选数据</span>"
+                candidates_html = "<span style=\"color:#666;\">No candidate data</span>"
 
             html_rows.append(f"""
         <tr class="journey-row hidden indent-1" data-parent-id="block-{block_id_safe}" style="background-color: #eef6ff;">
             <td colspan="7" style="padding-left: 30px;">
                 <div style="line-height: 1.45;">
-                    <strong>🧠 指派解释</strong>
+                    <strong>Assignment Explainability</strong>
                     <span style="color:#666;">[{strategy_name}/{mode_name}]</span>
                     <span style="color:#666;">@ {explain_time_str}</span>
                     <div style="margin-top: 4px;">
-                        <strong>结论：</strong>
-                        选择 <strong>Bus {selected_bus}</strong>
-                        （当前位置 <code>{selected_point}</code>，SOC {selected_soc_str}%），
-                        目标起点 <code>{origin_pid}</code>，目标距离 {target_distance_str}km，
-                        是否改派：<strong>{changed_label}</strong>。
+                        <strong>Decision:</strong>
+                        Selected <strong>Bus {selected_bus}</strong>
+                        (current point <code>{selected_point}</code>, SOC {selected_soc_str}%),
+                        target origin <code>{origin_pid}</code>, target distance {target_distance_str}km,
+                        reassigned: <strong>{changed_label}</strong>.
                     </div>
                     <div style="margin-top: 6px;">
-                        <strong>候选对比（Top 5）：</strong>
+                        <strong>Candidate comparison (Top 5):</strong>
                         {candidates_html}
                     </div>
                 </div>

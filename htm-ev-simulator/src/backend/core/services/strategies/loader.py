@@ -35,14 +35,16 @@ def _iter_strategy_classes() -> list[type]:
 
 def build_enabled_strategies(flags: dict[str, bool] | None = None) -> list[SimulationStrategy]:
     flags = flags or {}
-    strategies: list[SimulationStrategy] = []
+    enabled_entries: list[tuple[int, SimulationStrategy]] = []
     for cls in _iter_strategy_classes():
         key = getattr(cls, "strategy_key", "")
         enabled_default = bool(getattr(cls, "enabled_by_default", False))
         enabled = flags.get(key, enabled_default)
         if enabled:
-            strategies.append(cls())
-    return strategies
+            priority = int(getattr(cls, "execution_priority", 100))
+            enabled_entries.append((priority, cls()))
+    enabled_entries.sort(key=lambda item: item[0])
+    return [instance for _, instance in enabled_entries]
 
 
 def run_before_journey(strategies: list[SimulationStrategy], service: Any, state: Any) -> None:

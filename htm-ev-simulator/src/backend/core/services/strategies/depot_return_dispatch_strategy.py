@@ -16,6 +16,8 @@ behavior via scheduler helper methods.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from .base import StrategyRuntimeState
 
 
@@ -265,10 +267,18 @@ class DepotReturnDispatchStrategy:
         if state.journey_index != 0:
             return
 
-        assignment_mode = "depot_return" if (self._is_single_journey_block(state) and self._is_depot_return_journey(state)) else "general"
+        is_single_depot_return = self._is_single_journey_block(state) and self._is_depot_return_journey(state)
+        assign_dt = datetime.fromtimestamp(state.assign_time) if isinstance(state.assign_time, (int, float)) else None
+        in_midnight_window = bool(assign_dt and 0 <= assign_dt.hour < 6)
+        if is_single_depot_return and in_midnight_window:
+            assignment_mode = "midnight_depot_return_priority"
+        elif is_single_depot_return:
+            assignment_mode = "depot_return"
+        else:
+            assignment_mode = "general"
         explain_candidates: list[dict] = []
         selected = None
-        if assignment_mode == "depot_return":
+        if assignment_mode in {"depot_return", "midnight_depot_return_priority"}:
             explain_candidates = self._top_depot_return_candidates(service, state)
             selected = self._select_depot_return_best_bus(service, state)
 

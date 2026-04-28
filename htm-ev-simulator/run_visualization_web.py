@@ -199,8 +199,12 @@ def _build_form_page(message: str = "", error: str = "") -> str:
         </div>
       </div>
       <label>
-        <input type="checkbox" name="enable_precheck_replacement_strategy" checked />
-        Enable precheck replacement strategy (8xxxxxx return + 9xxxxxx dispatch)
+        <input type="checkbox" name="enable_precheck_force_return_strategy" checked />
+        Enable precheck force-return strategy (generate 8xxxxxx forced return when no planned return is matched)
+      </label>
+      <label>
+        <input type="checkbox" name="enable_precheck_dispatch_replacement_strategy" checked />
+        Enable precheck replacement-dispatch strategy (generate 9xxxxxx replacement dispatch)
       </label>
       <label>
         <input type="checkbox" name="enable_opportunity_charging_strategy" checked />
@@ -328,8 +332,10 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         args.append("--fallback-to-stub")
     if "simulate_all_vehicles" in form:
         args.append("--simulate-all-vehicles")
-    if "enable_precheck_replacement_strategy" in form:
-        args.append("--enable-precheck-replacement-strategy")
+    if "enable_precheck_force_return_strategy" in form:
+        args.append("--enable-precheck-force-return-strategy")
+    if "enable_precheck_dispatch_replacement_strategy" in form:
+        args.append("--enable-precheck-dispatch-replacement-strategy")
     if "enable_opportunity_charging_strategy" in form:
         args.append("--enable-opportunity-charging-strategy")
     if "enable_start_full_soc_strategy" in form:

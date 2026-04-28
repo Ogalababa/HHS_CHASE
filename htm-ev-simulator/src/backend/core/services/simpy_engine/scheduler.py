@@ -553,6 +553,45 @@ class SimpyScheduler:
             ]
             return min(departures) if departures else datetime.min
 
+        def _reset_buses_to_garage_for_day(day_start_ts: float) -> None:
+            """
+            Force daily midnight garage reset for all buses.
+
+            Rationale: Operations requires each day to start from a deterministic
+            depot baseline. This prevents day-to-day carry-over location drift.
+            """
+            if garage_point is None:
+                return
+            for bus in buses:
+                prev_point_id = str(getattr(getattr(bus, "location", None), "point_id", "")) or "N/A"
+                if prev_point_id != str(garage_point.point_id):
+                    self.logger.planning_log.append(
+                        {
+                            "event": "daily_garage_reset",
+                            "time": day_start_ts,
+                            "bus_vin": bus.vin_number,
+                            "bus_number": bus.vehicle_number,
+                            "from_point_id": prev_point_id,
+                            "to_point_id": str(garage_point.point_id),
+                            "reason": "Daily midnight baseline reset to Garage Telexstraat",
+                        }
+                    )
+                bus.location = garage_point
+                self.logger.planning_log.append(
+                    {
+                        "event": "bus_location_update",
+                        "time": day_start_ts,
+                        "bus_vin": bus.vin_number,
+                        "bus_number": bus.vehicle_number,
+                        "block_id": None,
+                        "journey_id": None,
+                        "point_id": garage_point.point_id,
+                        "point_name": garage_point.name,
+                        "reason": "daily_midnight_reset_to_garage",
+                    }
+                )
+
+        last_reset_operating_day: date | None = None
         for block in sorted(
             blocks,
             key=_block_first_departure,
@@ -576,6 +615,11 @@ class SimpyScheduler:
                 if not journey.points:
                     continue
                 journey_start = journey.points[0].departure_datetime.timestamp()
+                journey_operating_day = journey.points[0].departure_datetime.date()
+                if last_reset_operating_day != journey_operating_day:
+                    midnight_ts = datetime.combine(journey_operating_day, datetime.min.time()).timestamp()
+                    _reset_buses_to_garage_for_day(midnight_ts)
+                    last_reset_operating_day = journey_operating_day
                 if self.simulation_end_timestamp is not None and journey_start > self.simulation_end_timestamp:
                     continue
                 if current_bus is None:
