@@ -1,0 +1,12 @@
+{
+  "include": ["src", "tests", "scripts", "main.py", "*.py"],
+  "exclude": ["**/node_modules", "**/__pycache__", "out"],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["src"],
+      "pythonVersion": "3.10"
+    }
+  ],
+  "typeCheckingMode": "basic"
+}

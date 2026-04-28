@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/pyright-internal/schemas/pyright.schema.json",
+  "include": ["htm-ev-simulator"],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/out"],
+  "executionEnvironments": [
+    {
+      "root": "htm-ev-simulator",
+      "extraPaths": ["src"],
+      "pythonVersion": "3.10"
+    }
+  ],
+  "typeCheckingMode": "basic"
+}
