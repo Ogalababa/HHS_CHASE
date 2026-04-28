@@ -344,6 +344,9 @@ def generate_dynamic_report(
     const tbody = document.querySelector("#Report tbody");
     if (tbody) {
       tbody.innerHTML = await fetchPart("breakdown_rows.html");
+      if (typeof window.refreshAssignedBusFilter === "function") {
+        window.refreshAssignedBusFilter();
+      }
     }
     loaded.add("report");
   };

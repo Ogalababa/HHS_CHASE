@@ -218,6 +218,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Apply grid power limit strategy (Telexstraat/30002 only).",
     )
+    parser.add_argument(
+        "--enable-depot-return-dispatch-strategy",
+        action="store_true",
+        help=(
+            "For single-journey return-to-depot blocks, infer origin from journey distance "
+            "and prefer an idle bus waiting at that inferred origin stop."
+        ),
+    )
 
     parser.add_argument(
         "--report-path",
@@ -397,6 +405,7 @@ def main() -> None:
         enable_opportunity_charging_strategy=args.enable_opportunity_charging_strategy,
         enable_start_full_soc_strategy=args.enable_start_full_soc_strategy,
         enable_power_limit_strategy=args.enable_power_limit_strategy,
+        enable_depot_return_dispatch_strategy=args.enable_depot_return_dispatch_strategy,
         simulation_start_timestamp=sim_start_dt.timestamp(),
         simulation_end_timestamp=sim_end_dt.timestamp(),
     )

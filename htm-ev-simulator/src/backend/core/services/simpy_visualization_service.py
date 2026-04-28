@@ -36,6 +36,7 @@ class VisualizationSimulationService:
     enable_opportunity_charging_strategy: bool = False
     enable_start_full_soc_strategy: bool = False
     enable_power_limit_strategy: bool = False
+    enable_depot_return_dispatch_strategy: bool = False
     opportunity_charging_soc_threshold_percent: float = 80.0
     opportunity_charging_min_gap_seconds: int = 1800
     strategy_flags: dict[str, bool] = field(default_factory=dict)
@@ -48,6 +49,7 @@ class VisualizationSimulationService:
             "opportunity_charging": self.enable_opportunity_charging_strategy,
             "start_full_soc": self.enable_start_full_soc_strategy,
             "power_limit": self.enable_power_limit_strategy,
+            "depot_return_dispatch": self.enable_depot_return_dispatch_strategy,
         }
         merged.update(self.strategy_flags or {})
         self.strategy_flags = merged

@@ -163,7 +163,7 @@ def _build_form_page(message: str = "", error: str = "") -> str:
         </div>
         <div>
           <label for="sim_hours">Duration (hours)</label>
-          <input id="sim_hours" name="sim_hours" type="number" value="12" min="1" max="72" required />
+          <input id="sim_hours" name="sim_hours" type="number" value="24" min="1" max="72" required />
         </div>
       </div>
     </fieldset>
@@ -199,20 +199,24 @@ def _build_form_page(message: str = "", error: str = "") -> str:
         </div>
       </div>
       <label>
-        <input type="checkbox" name="enable_precheck_replacement_strategy" />
+        <input type="checkbox" name="enable_precheck_replacement_strategy" checked />
         Enable precheck replacement strategy (8xxxxxx return + 9xxxxxx dispatch)
       </label>
       <label>
-        <input type="checkbox" name="enable_opportunity_charging_strategy" />
+        <input type="checkbox" name="enable_opportunity_charging_strategy" checked />
         Enable opportunity charging (terminal has charger, SOC&lt;80%, gap&gt;30 min)
       </label>
       <label>
-        <input type="checkbox" name="enable_start_full_soc_strategy" />
+        <input type="checkbox" name="enable_start_full_soc_strategy" checked />
         Enable full SOC start strategy (set all buses SOC=100% at simulation start)
       </label>
       <label>
-        <input type="checkbox" name="enable_power_limit_strategy" />
+        <input type="checkbox" name="enable_power_limit_strategy" checked />
         Enable power limit strategy (apply grid cap at Telexstraat / point 30002 only)
+      </label>
+      <label>
+        <input type="checkbox" name="enable_depot_return_dispatch_strategy" checked />
+        Enable smart block assignment strategy (optimize first-journey assignment for all blocks with depot-return optimization)
       </label>
     </fieldset>
 
@@ -303,7 +307,7 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         "--sim-start",
         v("sim_start", "06:00"),
         "--sim-hours",
-        v("sim_hours", "48"),
+        v("sim_hours", "24"),
         "--use-real-buses",
         v("use_real_buses", "omniplus"),
         "--low-soc-threshold",
@@ -332,6 +336,8 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         args.append("--enable-start-full-soc-strategy")
     if "enable_power_limit_strategy" in form:
         args.append("--enable-power-limit-strategy")
+    if "enable_depot_return_dispatch_strategy" in form:
+        args.append("--enable-depot-return-dispatch-strategy")
 
     vins = v("omniplus_vins", "")
     if vins:

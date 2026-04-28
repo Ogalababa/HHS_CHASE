@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Dict, Optional, List, Any, TYPE_CHECKING
 from datetime import datetime
 from pathlib import Path
+import html
 import json
 
 if TYPE_CHECKING:
@@ -285,12 +286,45 @@ def generate_planning_detailed_section(
     )
     
     html_parts = []
+    assigned_bus_numbers = sorted(
+        {
+            str(data.get('bus_number'))
+            for data in blocks_data.values()
+            if data.get('bus_number') is not None
+        },
+        key=lambda x: int(x) if x.isdigit() else x,
+    )
+
+    filter_options_html = "\n".join(
+        f'<option value="{html.escape(bus)}">{html.escape(bus)}</option>'
+        for bus in assigned_bus_numbers
+    )
+    html_parts.append(f"""
+    <div class="planning-filter-panel" style="margin: 10px 0 14px 0; padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: #f8f9fa;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Assigned Bus Nr Filter (multi-select)</div>
+        <div style="display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;">
+            <select id="planning-assigned-bus-filter" multiple size="6" style="min-width: 180px;">
+                {filter_options_html}
+            </select>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" onclick="applyPlanningAssignedBusFilter()">Apply Filter</button>
+                <button type="button" onclick="clearPlanningAssignedBusFilter()">Clear Filter</button>
+                <button type="button" onclick="selectAllPlanningAssignedBusFilter()">Select All</button>
+            </div>
+        </div>
+        <div id="planning-assigned-bus-filter-status" style="margin-top: 8px; color: #555;">
+            Showing all blocks ({len(sorted_blocks)} total)
+        </div>
+    </div>
+    """)
     for block_id, block_data in sorted_blocks:
         block = world.blocks.get(block_id) if world else None
         block_id_safe = block_id.replace(':', '-').replace('/', '-')
         
+        assigned_bus = block_data.get('bus_number')
+        assigned_bus_attr = html.escape(str(assigned_bus)) if assigned_bus is not None else "N/A"
         html_parts.append(f"""
-        <div class="block-section">
+        <div class="block-section" data-assigned-bus="{assigned_bus_attr}">
             <div class="block-header collapsed" id="block-header-{block_id_safe}" onclick="toggleBlock('{block_id_safe}')">
                 <span class="toggle-icon">▶</span>
                 <strong>Block: {block_id}</strong>
@@ -355,6 +389,68 @@ def generate_planning_detailed_section(
         </div>
         """)
     
+    html_parts.append("""
+    <script>
+    (function () {
+        function selectedBusValues() {
+            var select = document.getElementById('planning-assigned-bus-filter');
+            if (!select) return [];
+            var selected = [];
+            for (var i = 0; i < select.options.length; i += 1) {
+                if (select.options[i].selected) selected.push(select.options[i].value);
+            }
+            return selected;
+        }
+
+        function updateFilterStatus(visibleCount, totalCount, selected) {
+            var statusEl = document.getElementById('planning-assigned-bus-filter-status');
+            if (!statusEl) return;
+            if (!selected.length) {
+                statusEl.textContent = "Showing all blocks (" + totalCount + " total)";
+                return;
+            }
+            statusEl.textContent =
+                "Showing " + visibleCount + " / " + totalCount + " blocks for bus: " + selected.join(", ");
+        }
+
+        window.applyPlanningAssignedBusFilter = function () {
+            var selected = selectedBusValues();
+            var sections = document.querySelectorAll('.block-section[data-assigned-bus]');
+            var total = sections.length;
+            var visible = 0;
+            for (var i = 0; i < sections.length; i += 1) {
+                var section = sections[i];
+                var bus = section.getAttribute('data-assigned-bus');
+                var show = selected.length === 0 || selected.indexOf(bus) >= 0;
+                section.style.display = show ? '' : 'none';
+                if (show) visible += 1;
+            }
+            updateFilterStatus(visible, total, selected);
+        };
+
+        window.clearPlanningAssignedBusFilter = function () {
+            var select = document.getElementById('planning-assigned-bus-filter');
+            if (select) {
+                for (var i = 0; i < select.options.length; i += 1) {
+                    select.options[i].selected = false;
+                }
+            }
+            window.applyPlanningAssignedBusFilter();
+        };
+
+        window.selectAllPlanningAssignedBusFilter = function () {
+            var select = document.getElementById('planning-assigned-bus-filter');
+            if (select) {
+                for (var i = 0; i < select.options.length; i += 1) {
+                    select.options[i].selected = true;
+                }
+            }
+            window.applyPlanningAssignedBusFilter();
+        };
+    })();
+    </script>
+    """)
+
     return "\n".join(html_parts)
 
 
@@ -405,6 +501,7 @@ def generate_breakdown_table_body(
     return_journey_map = {}
     # Build block end return journey map: (block_id, return_journey_id) -> block_end_return_journey_info
     block_end_return_journey_map = {}
+    assignment_explain_map = {}
     import re
     for log in planning_log:
         if log.get('event') == 'block_end_return_journey_created':
@@ -451,6 +548,21 @@ def generate_breakdown_table_body(
                     'original_journey_id': log.get('original_journey_id'),
                     'time': log.get('time'),
                     'reason': log.get('reason', 'Return journey created')
+                }
+        elif log.get('event') == 'strategy_block_assignment_explain':
+            block_id = log.get('block_id')
+            if block_id:
+                assignment_explain_map[block_id] = {
+                    'time': log.get('time'),
+                    'strategy': log.get('strategy'),
+                    'assignment_mode': log.get('assignment_mode'),
+                    'selected_bus_number': log.get('selected_bus_number'),
+                    'selected_bus_point_id': log.get('selected_bus_point_id'),
+                    'selected_bus_soc_percent': log.get('selected_bus_soc_percent'),
+                    'origin_point_id': log.get('origin_point_id'),
+                    'target_distance_km': log.get('target_distance_km'),
+                    'changed_assignment': log.get('changed_assignment'),
+                    'candidates': log.get('candidates', []),
                 }
     
     # Build charging sessions map: {bus_vin: {start_time: {end_time, end_soc, location_id, charger_id, connector_id}}}
@@ -1048,8 +1160,9 @@ def generate_breakdown_table_body(
         if block_labels:
             labels_str = " | ".join(block_labels)
             block_status = f" <span style=\"color:#b02a37; font-weight:600;\">[{labels_str}]</span>"
+        assigned_bus_attr = html.escape(str(block_data['bus_number'])) if block_data.get('bus_number') is not None else "N/A"
         html_rows.append(f"""
-        <tr class="block-row" id="block-{block_id_safe}">
+        <tr class="block-row" id="block-{block_id_safe}" data-assigned-bus="{assigned_bus_attr}">
             <td class="toggle" onclick="toggleVisibility('block-{block_id_safe}')">
                 <span class="icon">▶</span> {display_block_id}{block_status}
             </td>
@@ -1059,6 +1172,76 @@ def generate_breakdown_table_body(
             <td>{block_data['bus_number'] or 'N/A'}</td>
             <td>{block_soc_str}</td>
             <td>{block_charging_info}</td>
+        </tr>""")
+
+        # Add assignment explainability row emitted by depot_return_dispatch strategy.
+        explain_info = assignment_explain_map.get(block_id)
+        if explain_info:
+            explain_time = explain_info.get('time')
+            explain_time_str = (
+                datetime.fromtimestamp(explain_time).strftime('%Y-%m-%d %H:%M:%S')
+                if isinstance(explain_time, (int, float))
+                else "N/A"
+            )
+            strategy_name = html.escape(str(explain_info.get('strategy') or 'N/A'))
+            mode_name = html.escape(str(explain_info.get('assignment_mode') or 'N/A'))
+            selected_bus = html.escape(str(explain_info.get('selected_bus_number') or 'N/A'))
+            selected_point = html.escape(str(explain_info.get('selected_bus_point_id') or 'N/A'))
+            selected_soc = explain_info.get('selected_bus_soc_percent')
+            selected_soc_str = f"{selected_soc:.2f}" if isinstance(selected_soc, (int, float)) else "N/A"
+            origin_pid = html.escape(str(explain_info.get('origin_point_id') or 'N/A'))
+            target_distance = explain_info.get('target_distance_km')
+            target_distance_str = f"{target_distance:.2f}" if isinstance(target_distance, (int, float)) else "N/A"
+            changed = bool(explain_info.get('changed_assignment'))
+            changed_label = "是（已改派）" if changed else "否（保持原分配）"
+
+            candidates = explain_info.get('candidates') or []
+            rendered_candidates_html: list[str] = []
+            for idx, c in enumerate(candidates[:5], start=1):
+                bus_nr = html.escape(str(c.get('bus_number', 'N/A')))
+                pid = html.escape(str(c.get('point_id', 'N/A')))
+                soc = c.get('soc_percent')
+                soc_str = f"{soc:.2f}" if isinstance(soc, (int, float)) else "N/A"
+                if "score" in c:
+                    score = c.get('score')
+                    score_str = f"{score:.4f}" if isinstance(score, (int, float)) else "N/A"
+                    can_complete = "可完成" if c.get('can_complete') else "不可完成"
+                    rendered_candidates_html.append(
+                        f"<li>{idx}. Bus <strong>{bus_nr}</strong> @ 点位 <code>{pid}</code>, SOC={soc_str}%, 评分={score_str}, {can_complete}</li>"
+                    )
+                else:
+                    delta = c.get('distance_delta_km')
+                    delta_str = f"{delta:.4f}" if isinstance(delta, (int, float)) else "N/A"
+                    base = c.get('baseline_distance_km')
+                    base_str = f"{base:.2f}" if isinstance(base, (int, float)) else "N/A"
+                    rendered_candidates_html.append(
+                        f"<li>{idx}. Bus <strong>{bus_nr}</strong> @ 点位 <code>{pid}</code>, SOC={soc_str}%, 距离偏差={delta_str}km, 基线距离={base_str}km</li>"
+                    )
+            if rendered_candidates_html:
+                candidates_html = "<ul style=\"margin: 6px 0 0 18px; padding: 0;\">" + "".join(rendered_candidates_html) + "</ul>"
+            else:
+                candidates_html = "<span style=\"color:#666;\">无候选数据</span>"
+
+            html_rows.append(f"""
+        <tr class="journey-row hidden indent-1" data-parent-id="block-{block_id_safe}" style="background-color: #eef6ff;">
+            <td colspan="7" style="padding-left: 30px;">
+                <div style="line-height: 1.45;">
+                    <strong>🧠 指派解释</strong>
+                    <span style="color:#666;">[{strategy_name}/{mode_name}]</span>
+                    <span style="color:#666;">@ {explain_time_str}</span>
+                    <div style="margin-top: 4px;">
+                        <strong>结论：</strong>
+                        选择 <strong>Bus {selected_bus}</strong>
+                        （当前位置 <code>{selected_point}</code>，SOC {selected_soc_str}%），
+                        目标起点 <code>{origin_pid}</code>，目标距离 {target_distance_str}km，
+                        是否改派：<strong>{changed_label}</strong>。
+                    </div>
+                    <div style="margin-top: 6px;">
+                        <strong>候选对比（Top 5）：</strong>
+                        {candidates_html}
+                    </div>
+                </div>
+            </td>
         </tr>""")
         
         # Add block end charging info row if bus returned to Telexstraat after block completion
@@ -1548,9 +1731,17 @@ def generate_breakdown_table_body(
                                                 point_charging_info = "Charger unavailable"
                                                 break
                 
-                # For last point of a journey, check if bus goes to Telexstraat for charging after journey end
-                # This handles cases where bus returns to Telexstraat after completing a journey (not just block end)
-                if is_last_point and point_charging_info == "-":
+                # For last point of a journey, optionally check if bus goes to Telexstraat after journey end.
+                # IMPORTANT: only do this for return-to-garage semantics; otherwise we may incorrectly
+                # attach block-end depot charging to a normal journey endpoint.
+                is_telexstraat_destination_point = (
+                    str(point.get('point_id', '')) == '30002'
+                    or 'Telexstraat' in str(point.get('point_name', ''))
+                )
+                allow_post_journey_telexstraat_overlay = bool(
+                    journey_data.get('is_return_journey') or is_telexstraat_destination_point
+                )
+                if is_last_point and point_charging_info == "-" and allow_post_journey_telexstraat_overlay:
                     journey_end_time = journey_data.get('journey_end_time')
                     
                     # Special handling for return journey: use return_journey_bus_vin
@@ -1578,14 +1769,13 @@ def generate_breakdown_table_body(
                             # No replacement, check if journey bus goes to Telexstraat
                             bus_to_check_vin = journey_bus_vin
                     
-                    # For return journey, check both charging_sessions_map and charging_info_map
-                    # Use a longer time window (4 hours) to catch delayed charging
+                    # For return journey / Telexstraat destination, check both maps.
+                    # Use a longer time window to catch delayed charging.
                     if bus_to_check_vin and journey_end_time:
                         time_window = 14400 if journey_data.get('is_return_journey') else 7200
                         time_window_end = journey_end_time + time_window
                         
-                        # First, try charging_sessions_map (more accurate, includes end time)
-                        # Check for ANY journey ending (not just return journeys) - bus may return to Telexstraat after any journey
+                        # First, try charging_sessions_map (more accurate, includes end time).
                         if bus_to_check_vin in charging_sessions_map:
                             for charge_start_time, charge_session in sorted(charging_sessions_map[bus_to_check_vin].items()):
                                 if charge_start_time and charge_start_time >= journey_end_time and charge_start_time <= time_window_end:
@@ -1598,11 +1788,9 @@ def generate_breakdown_table_body(
                                             point_charging_info = f"{charger}-{connector}"
                                             break  # Only show first charging session
                         
-                        # If not found in charging_sessions_map, try charging_info_map (for return journey OR any journey ending at Telexstraat)
+                        # If not found in charging_sessions_map, try charging_info_map.
                         if point_charging_info == "-" and bus_to_check_vin in charging_info_map:
-                            # Check if this is a return journey OR if the journey ends at Telexstraat
-                            # For return journeys, we already checked above, so this is a fallback
-                            # Also check for any journey that might end at Telexstraat (even if not marked as return journey)
+                            # Fallback for return journey / Telexstraat destination.
                             for charge_time, charge_info in sorted(charging_info_map[bus_to_check_vin].items()):
                                 if charge_time and charge_time >= journey_end_time and charge_time <= time_window_end:
                                     location = charge_info.get('location_id', 'N/A')
@@ -1693,10 +1881,11 @@ def generate_breakdown_table_body(
                                 pass
                         # #endregion
                 
-                # For last point of last journey in block, check for Block End Charging at Telexstraat
-                # This is a fallback for block-level charging (if not already set by journey-level check above)
+                # For last point of last journey in block, optionally show Block End Charging at Telexstraat.
+                # Keep this only for return-to-garage/Telexstraat-destination points to avoid leakage into
+                # regular journey endpoints.
                 if is_last_point and is_last_journey_in_block and not block_skipped and block_data.get('block_end_time'):
-                    if point_charging_info == "-":  # Only check if not already set
+                    if point_charging_info == "-" and allow_post_journey_telexstraat_overlay:  # Only check if not already set
                         block_end_time = block_data.get('block_end_time')
                         # Get bus info from the last journey (this is the bus that actually completed the block)
                         last_journey_bus_vin = journey_data.get('replacement_bus_vin') or journey_data.get('bus_vin') or block_data.get('bus_vin')

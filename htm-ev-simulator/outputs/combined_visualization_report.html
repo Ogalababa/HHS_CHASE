@@ -253,13 +253,93 @@
             header.classList.toggle('collapsed');
             content.classList.toggle('hidden');
         }
+
+        function getSelectedAssignedBusNumbers() {
+            const select = document.getElementById('assigned-bus-filter');
+            if (!select) return [];
+            const selected = [];
+            for (const opt of select.options) {
+                if (opt.selected) selected.push(opt.value);
+            }
+            return selected;
+        }
+
+        function applyAssignedBusFilter() {
+            const selected = getSelectedAssignedBusNumbers();
+            const blockRows = document.querySelectorAll('#Report tr.block-row[data-assigned-bus]');
+            const total = blockRows.length;
+            let shown = 0;
+            for (const blockRow of blockRows) {
+                const busNr = blockRow.getAttribute('data-assigned-bus') || 'N/A';
+                const show = selected.length === 0 || selected.includes(busNr);
+                blockRow.style.display = show ? '' : 'none';
+                if (!show) {
+                    // Also hide expanded children when parent is filtered out.
+                    const parentId = blockRow.id;
+                    const children = document.querySelectorAll(`#Report tr[data-parent-id="${parentId}"]`);
+                    children.forEach((child) => { child.style.display = 'none'; });
+                    blockRow.classList.remove('expanded');
+                } else {
+                    shown += 1;
+                }
+            }
+
+            const status = document.getElementById('assigned-bus-filter-status');
+            if (status) {
+                if (selected.length === 0) {
+                    status.textContent = `Showing all blocks (${total} total)`;
+                } else {
+                    status.textContent = `Showing ${shown} / ${total} blocks for bus: ${selected.join(', ')}`;
+                }
+            }
+        }
+
+        function clearAssignedBusFilter() {
+            const select = document.getElementById('assigned-bus-filter');
+            if (!select) return;
+            for (const opt of select.options) opt.selected = false;
+            applyAssignedBusFilter();
+        }
+
+        function selectAllAssignedBusFilter() {
+            const select = document.getElementById('assigned-bus-filter');
+            if (!select) return;
+            for (const opt of select.options) opt.selected = true;
+            applyAssignedBusFilter();
+        }
+
+        function refreshAssignedBusFilter() {
+            const select = document.getElementById('assigned-bus-filter');
+            if (!select) return;
+
+            const selectedBefore = new Set(getSelectedAssignedBusNumbers());
+            select.innerHTML = "";
+            const blockRows = Array.from(document.querySelectorAll('#Report tr.block-row[data-assigned-bus]'));
+            const buses = Array.from(
+                new Set(blockRows.map((row) => row.getAttribute('data-assigned-bus') || 'N/A'))
+            ).sort((a, b) => {
+                const na = Number(a), nb = Number(b);
+                if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+                return String(a).localeCompare(String(b));
+            });
+
+            for (const bus of buses) {
+                const opt = document.createElement('option');
+                opt.value = bus;
+                opt.textContent = bus;
+                if (selectedBefore.has(bus)) opt.selected = true;
+                select.appendChild(opt);
+            }
+
+            applyAssignedBusFilter();
+        }
     </script>
 </head>
 <body>
     <header>
         <h1>Visualization Report</h1>
         <div class="header-meta">
-            <span>Simulation window: 2026-02-05 06:00:00 - 2026-02-06 05:00:00</span>
+            <span>Simulation window: 2026-02-02 06:00:00 - 2026-02-03 06:00:00</span>
             <a class="config-link" href="http://127.0.0.1:8765/" target="_blank" rel="noopener noreferrer">Back to Simulation Configurator</a>
         </div>
     </header>
@@ -281,6 +361,20 @@
         <div id="dyn-summary-slot"></div>
 
         <h2>Simulation Breakdown</h2>
+        <div style="margin: 8px 0 12px 0; padding: 10px; border: 1px solid #dee2e6; border-radius: 8px; background: #f8f9fa;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Assigned Bus Nr Filter (multi-select)</div>
+            <div style="display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;">
+                <select id="assigned-bus-filter" multiple size="6" style="min-width: 180px;"></select>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" onclick="applyAssignedBusFilter()">Apply Filter</button>
+                    <button type="button" onclick="clearAssignedBusFilter()">Clear Filter</button>
+                    <button type="button" onclick="selectAllAssignedBusFilter()">Select All</button>
+                </div>
+            </div>
+            <div id="assigned-bus-filter-status" style="margin-top: 8px; color: #555;">
+                Showing all blocks
+            </div>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -370,6 +464,9 @@
     const tbody = document.querySelector("#Report tbody");
     if (tbody) {
       tbody.innerHTML = await fetchPart("breakdown_rows.html");
+      if (typeof window.refreshAssignedBusFilter === "function") {
+        window.refreshAssignedBusFilter();
+      }
     }
     loaded.add("report");
   };
