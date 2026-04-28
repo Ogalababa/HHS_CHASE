@@ -133,4 +133,4 @@ htm-ev-simulator/
 
 - Architecture: [`PROJECT_ARCHITECTURE.md`](PROJECT_ARCHITECTURE.md)
 - **Stable surface exposed from `SimpyScheduler` to strategies:** [`docs/STRATEGY_HOST_API.md`](docs/STRATEGY_HOST_API.md)
-- **PlantUML class diagram (generated from the codebase layout):** [`docs/plantuml/README.md`](docs/plantuml/README.md)
+- **PlantUML class diagrams** (overview + detailed, multi-page): [`docs/plantuml/README.md`](docs/plantuml/README.md)

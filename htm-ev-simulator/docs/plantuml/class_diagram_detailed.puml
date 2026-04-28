@@ -1,0 +1,564 @@
+@startuml htm-ev-simulator-class-diagram-detailed
+' Detailed class diagram — src/backend + key infrastructure
+' Render: plantuml class_diagram_detailed.puml
+' Multi-page output: use -tpng or PDF export for newpage sections
+' Single canvas (no newpage): class_diagram_detailed_single.puml
+
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+top to bottom direction
+title HTM EV Simulator — detailed class diagram (multi-page)
+
+legend right
+  <<aggregate>> = domain aggregate root
+  <<port>> = application port (ABC)
+  <<adapter>> = infrastructure implementation
+  <<service>> = orchestration / engine
+  <<DTO>> = data transfer / log container
+  <<protocol>> = typing.Protocol
+endlegend
+
+' =========================== PAGE 1: DOMAIN ===========================
+package "domain.exceptions" <<Rectangle>> {
+  class WorldDomainError <<exception>>
+  class DuplicateEntityIdError <<exception>>
+  class EntityNotFoundError <<exception>>
+  WorldDomainError <|-- DuplicateEntityIdError
+  WorldDomainError <|-- EntityNotFoundError
+
+  class LaadInfraDomainError <<exception>>
+  class ConnectorOccupiedError <<exception>>
+  LaadInfraDomainError <|-- ConnectorOccupiedError
+}
+
+package "domain.world" <<Rectangle>> {
+  class World <<aggregate root>> {
+    +buses_by_vehicle_number: dict[int, Bus]
+    +locations_by_id: dict[str, Location]
+    +grids_by_id: dict[str, Grid]
+    +blocks_by_id: dict[str, Block]
+    --
+    +add_bus(bus)
+    +add_location(location)
+    +add_grid(grid)
+    +add_block(block)
+    +get_bus(vehicle_number): Bus
+    +get_location(location_id): Location
+    +get_grid(grid_id): Grid
+    +get_block(block_id): Block
+    +connect_location_to_grid(location_id, grid_id)
+    +attach_locations_to_points(points: Iterable[PointInSequence])
+  }
+}
+
+package "domain.planning" <<Rectangle>> {
+  class Block {
+    +block_id: str
+    +operating_day: date
+    +original_block_id: str
+    +journeys: list[Journey]
+    +assigned_bus_vehicle_number: int | None
+    +sim_start_time: datetime | None
+    +sim_end_time: datetime | None
+    --
+    +journey_count: int
+    +total_distance_km: float
+  }
+  note right of Block
+    journey_count, total_distance_km
+    are @property in Python
+  end note
+  class Journey {
+    +journey_id: str
+    +original_journey_id: str
+    +journey_ref: str
+    +journey_type: str
+    +vehicle_type: str
+    +public_line_number: str
+    +version_type: str
+    +block_id: str | None
+    +points: list[PointInSequence]
+    +sim_start_time: datetime | None
+    +sim_end_time: datetime | None
+    --
+    +start_point: PointInSequence | None
+    +end_point: PointInSequence | None
+    +first_departure_datetime: datetime | None
+    +last_arrival_datetime: datetime | None
+    +duration: timedelta
+    +duration_seconds: float
+    +total_distance_km: float
+    +charging_points: list
+    +wait_points: list
+    +add_point(point) / sort_points()
+  }
+  class PointInSequence {
+    +point_id: str
+    +name: str
+    +sequence_order: int
+    +latitude / longitude: float
+    +distance_to_next_m: float | None
+    +arrival_datetime / departure_datetime: datetime
+    +wait_time: timedelta
+    +is_wait_point: bool
+    +charging_location: Location | None
+    +sim_bus_state_at_arrival: BusState | None
+    +sim_soc_at_arrival: float | None
+    +sim_range_at_arrival: float | None
+    +sim_bus_state_at_departure: BusState | None
+    +sim_soc_at_departure: float | None
+    +sim_range_at_departure: float | None
+    --
+    +is_charging_location: bool
+    +distance_km: float
+    +dwell_time: timedelta
+    +gps: tuple
+  }
+  Block "1" *-- "many" Journey
+  Journey "1" *-- "many" PointInSequence
+}
+
+package "domain.transport.bus" <<Rectangle>> {
+  enum BusState {
+    AVAILABLE
+    RUNNING
+    CHARGING
+    MAINTENANCE
+  }
+  class ChargingCurve <<value object>> {
+    +stage_a_end_soc: float
+    +stage_b_end_soc: float
+    +a_base_kw: float
+    +a_slope_kw_per_soc: float
+    +b_start_kw: float
+    +b_slope_kw_per_soc: float
+    +c_factor_kw: float
+    +c_divisor_soc: float
+    --
+    {static} +clamp_soc_percent(value): float
+    +power_cap_kw(soc_percent): float
+    +actual_battery_power_kw(soc_percent, charger_offered_power_kw, ...): float
+  }
+  note right of ChargingCurve
+    Module constant:
+    DEFAULT_CHARGING_CURVE: ChargingCurve
+  end note
+  class Bus <<entity>> {
+    +vehicle_number: int
+    +vin_number: str
+    +vehicle_type: str
+    +energy_consumption_per_km: float
+    +battery_capacity_kwh: float
+    +total_driven_distance_km: float
+    +assigned_blocks: list[Block]
+    +charging_loss_kw: float
+    +max_charging_power_kw: float | None
+    +location: PointInSequence | None
+    +connected_charge_point: ChargePoint | None
+    -_state: BusState
+    -_soc_percent: float
+    -charging_curve: ChargingCurve
+    --
+    +state / soc_percent: property
+    +current_energy_kwh: float
+    +update_soc(delta_kwh)
+    +remaining_range_km(): float
+    +has_low_soc(threshold_percent): bool
+    {static} +charging_power_cap_kw(soc_percent): float
+    +calculate_actual_charging_power_kw(charger_offered_power_kw): float
+  }
+  Bus --> BusState
+  Bus --> ChargingCurve
+}
+
+package "domain.laad_infra" <<Rectangle>> {
+  class Grid {
+    +grid_id: str
+    +name: str | None
+    +available_power_profile: Callable[[datetime], float] | None
+    +connected_locations: list[Location]
+    --
+    +get_available_power_at(time): float
+    +get_remaining_capacity_at(time): float
+    +connect_location(location)
+    +current_total_load_kw: float
+  }
+  class Location {
+    +location_id: str
+    +latitude / longitude: float
+    +point_id: str | None
+    +chargers: dict[str, Charger]
+    +grid: Grid | None
+    +physical_max_power_profile / max_power_profile: Callable | None
+    --
+    +get_or_create_charger(charger_id, **kwargs): Charger
+    +get_available_power_at(time): float
+    +get_physical_max_power_at(time): float
+    +current_load_kw: float
+    +remaining_capacity_kw: float
+  }
+  class Charger {
+    +charger_id: str
+    +serial_number / software_version: str | None
+    +connectors: list[Connector]
+    +max_power_kw: float
+    --
+    +add_connector(connector)
+    +current_load_kw: float
+    +available_power_kw: float
+  }
+  class Connector {
+    +connector_id: str
+    +max_power_kw: float
+    +connector_type: str
+    +connected_bus: Bus | None
+    +status: str
+    +offered_power_kw / current_power_kw: float
+    --
+    +is_available: bool
+    +connect_bus(bus) / disconnect_bus()
+    +set_charging() / set_connected()
+  }
+  class ChargePoint <<legacy>> {
+    +id: int
+    +connected_bus: Bus | None
+    --
+    +connect(bus) / disconnect()
+  }
+  Location "1" *-- "many" Charger
+  Charger "1" *-- "many" Connector
+  Location --> Grid : optional
+}
+
+World o-- "many" Bus
+World o-- "many" Block
+World o-- "many" Location
+World o-- "many" Grid
+PointInSequence ..> Location : charging_location
+Connector ..> Bus : connected_bus
+Bus ..> PointInSequence : location
+Bus ..> ChargePoint : connected_charge_point
+
+newpage
+
+' =========================== PAGE 2: PORTS + WORLD BUILD + DTOs ===========================
+package "application.ports" <<Rectangle>> {
+  abstract class BusProviderPort <<port>> {
+    {abstract} +get_buses(): list[Bus]
+  }
+  abstract class PlanningProviderPort <<port>> {
+    {abstract} +get_blocks(): list[Block]
+  }
+  abstract class InfrastructureProviderPort <<port>> {
+    {abstract} +get_grids(): list[Grid]
+    {abstract} +get_locations(): list[Location]
+    +get_location_grid_links(): list[tuple[str, str]]
+  }
+}
+
+package "application.services.world" <<Rectangle>> {
+  class WorldBuildResult <<DTO>> {
+    +world: World
+    +n_buses: int
+    +n_grids: int
+    +n_locations: int
+    +n_blocks: int
+    +n_journeys: int
+    +n_points: int
+  }
+  class WorldBuilder <<service>> {
+    -_planning: PlanningProviderPort
+    -_infrastructure: InfrastructureProviderPort
+    -_buses: BusProviderPort
+    --
+    +build(): WorldBuildResult
+  }
+  WorldBuilder ..> PlanningProviderPort
+  WorldBuilder ..> InfrastructureProviderPort
+  WorldBuilder ..> BusProviderPort
+  WorldBuilder ..> World : constructs
+}
+
+package "application.services.visualization_contract" <<Rectangle>> {
+  class ClassifiedLogger <<DTO>> {
+    +bus_log: list[dict]
+    +planning_log: list[dict]
+    +laadinfra_log: list[dict]
+  }
+  class VisualizationWorldView <<DTO>> {
+    +blocks: dict[str, Block]
+    +locations: dict[str, Location]
+    +buses: list[Bus]
+  }
+  class VisualizationSimulationResult <<DTO>> {
+    +world: VisualizationWorldView
+    +classified_logger: ClassifiedLogger
+    +current_time: float
+    +simulation_start_time / simulation_end_time: float | None
+    +completed_journeys: set[Journey]
+    +skipped_journeys: set[Journey]
+    +skipped_blocks: set[Block]
+  }
+  class "VisualizationSimulationService\n(visualization_simulation.py)" as LegacyVizSim <<service>> {
+    .. legacy / stub path ..
+    +_to_world_view(world): VisualizationWorldView
+  }
+  VisualizationSimulationResult *-- VisualizationWorldView
+  VisualizationSimulationResult *-- ClassifiedLogger
+}
+
+package "simpy_engine.log" <<Rectangle>> {
+  class InternalEventLog <<DTO>> {
+    +bus_log: list[dict[str, Any]]
+    +planning_log: list[dict[str, Any]]
+    +laadinfra_log: list[dict[str, Any]]
+  }
+}
+
+newpage
+
+' =========================== PAGE 3: SIMPY ENGINE ===========================
+package "simpy_engine" <<Rectangle>> {
+  class LocationPowerAllocator <<service>> {
+    +power_limit_enabled: bool
+    -_allocated_by_slot: dict[tuple[str, float], float]
+    --
+    +reset()
+    -_location_power_limit_kw(location, time_ts): float
+    {static} +location_current_load_kw(location): float
+    +allocate_power_kw(location, connector_previous_kw, desired_kw, next_time_ts): float
+    {static} +apply_energy(bus, power_kw, dt_seconds)
+  }
+
+  class SimpyScheduler <<service>> {
+    +world: World
+    +logger: InternalEventLog
+    +allocator: LocationPowerAllocator
+    +low_soc_alert_threshold_percent: float
+    +charging_target_soc_percent: float
+    +charging_step_seconds: int
+    +simulation_start_timestamp: float
+    +simulation_end_timestamp: float | None
+    +strategies: list
+    +opportunity_charging_soc_threshold_percent: float
+    +opportunity_charging_min_gap_seconds: int
+    --
+    {static} +_point_to_location(point): dict
+    {static} +_connector_status(connector): str
+    {static} +_find_point_by_id(world, point_id): PointInSequence | None
+    {static} +_build_virtual_garage_point(world): PointInSequence | None
+    {static} +_is_garage_destination_journey(journey): bool
+    {static} +_release_bus_connector(bus)
+    {static} +_select_connector(location): tuple | None
+    {static} +_select_bus_for_time(buses, bus_available_at, target_time, ...): Bus
+    +_can_complete_journey(bus, journey): bool
+    +_log_precheck_replacement(..., sequence): None
+    +_charge_until(bus, start_ts, until_ts, target_soc, strategy_name, logger)
+    +_maybe_charge(bus, start_time_ts, logger, **kwargs)
+    +_simulate_journey(bus, block, journey, completed_journeys): tuple[float, bool]
+    +run(env, blocks, buses): dict
+  }
+
+  SimpyScheduler *-- InternalEventLog
+  SimpyScheduler *-- LocationPowerAllocator
+  SimpyScheduler --> World
+  LocationPowerAllocator ..> Location
+  LocationPowerAllocator ..> Bus
+}
+
+newpage
+
+' =========================== PAGE 4: STRATEGIES + ENTRY SERVICE + INFRA ===========================
+package "strategies" <<Rectangle>> {
+  class StrategyRuntimeState <<DTO>> {
+    +world: Any
+    +block: Block
+    +journey: Journey
+    +journey_index: int
+    +assign_time: float
+    +active_bus: Bus
+    +buses: list[Bus]
+    +bus_available_at: dict[str, float]
+    +logger: Any
+    +journey_end: float | None
+    +journey_skipped: bool
+  }
+
+  interface SimulationStrategy <<protocol>> {
+    +strategy_key: str
+    +before_journey(service, state)
+    +after_journey(service, state)
+  }
+  note bottom of SimulationStrategy
+    Concrete classes may define
+    enabled_by_default: bool
+  end note
+
+  interface SimulationStrategyHost <<protocol>> {
+    +opportunity_charging_soc_threshold_percent: float
+    +opportunity_charging_min_gap_seconds: int
+    +charging_target_soc_percent: float
+    +low_soc_alert_threshold_percent: float
+    +charging_step_seconds: int
+    --
+    +_can_complete_journey(bus, journey): bool
+    +_select_bus_for_time(...): Bus
+    +_log_precheck_replacement(...): None
+    +_maybe_charge(bus, start_ts, logger, **kw): None
+  }
+
+  class PrecheckReplacementStrategy {
+    +strategy_key = "precheck_replacement"
+    +enabled_by_default = False
+    -_replacement_counter: int
+    --
+    +before_journey(service, state)
+    +after_journey(service, state)
+  }
+  class OpportunityChargingStrategy {
+    +strategy_key = "opportunity_charging"
+    +enabled_by_default = False
+    --
+    +before_journey(service, state)
+    +after_journey(service, state)
+  }
+  class StartFullSocStrategy {
+    +strategy_key = "start_full_soc"
+    --
+    +before_journey(service, state)
+    +after_journey(service, state)
+  }
+  class PowerLimitStrategy {
+    +strategy_key = "power_limit"
+    --
+    +before_journey(service, state)
+    +after_journey(service, state)
+  }
+
+  class "strategy loader (functions)" as StrategyLoader <<artifact>> {
+    .. loader.py ..
+    _iter_strategy_classes(): list[type]
+    build_enabled_strategies(flags): list
+    run_before_journey(strategies, service, state)
+    run_after_journey(strategies, service, state)
+  }
+
+  PrecheckReplacementStrategy ..|> SimulationStrategy
+  OpportunityChargingStrategy ..|> SimulationStrategy
+  StartFullSocStrategy ..|> SimulationStrategy
+  PowerLimitStrategy ..|> SimulationStrategy
+  SimpyScheduler ..|> SimulationStrategyHost
+  SimpyScheduler o-- "0..*" SimulationStrategy : strategies
+  SimulationStrategy ..> SimulationStrategyHost : service
+  SimulationStrategy ..> StrategyRuntimeState
+}
+
+note bottom of StrategyLoader
+  Module-level functions in strategies/loader.py
+end note
+
+package "simpy_visualization_service" <<Rectangle>> {
+  class "VisualizationSimulationService\n(simpy_visualization_service.py)" as SimPyVizService <<service>> {
+    +low_soc_alert_threshold_percent: float
+    +charging_target_soc_percent: float
+    +charging_step_seconds: int
+    +enable_*_strategy: bool (x4)
+    +opportunity_charging_soc_threshold_percent: float
+    +opportunity_charging_min_gap_seconds: int
+    +strategy_flags: dict[str, bool]
+    +simulation_start_timestamp / simulation_end_timestamp: float | None
+    --
+    +__post_init__(): merges strategy_flags
+    +run(world): VisualizationSimulationResult
+  }
+  SimPyVizService ..> SimpyScheduler : builds
+  SimPyVizService ..> InternalEventLog
+  SimPyVizService ..> LocationPowerAllocator
+  SimPyVizService ..> StrategyLoader : build_enabled_strategies
+  SimPyVizService ..> LegacyVizSim : _to_world_view
+  SimPyVizService ..> VisualizationSimulationResult
+}
+
+package "infrastructure" <<Rectangle>> {
+  class OmniplusBusProvider <<adapter>> {
+    +client: OmniplusOnClient
+    +vins: list[str]
+    +vin_to_vehicle_number: dict | None
+    +default_battery_capacity_kwh: float
+    --
+    +get_buses(): list[Bus]
+  }
+  class BusPlanningParquetProvider <<adapter>> {
+    +start_date / end_date: date
+    +base_path: str
+    +datalake: DataLakeConfig | None
+    +simulation_start / simulation_end: datetime | None
+    --
+    +get_blocks(): list[Block]
+  }
+  class ConnectorJsonInfrastructureProvider <<adapter>> {
+    +json_path: Path
+    +power_limits_path: Path | None
+    --
+    +get_grids() / get_locations()
+    +get_location_grid_links()
+    -_build(): tuple[dict, dict, list]
+    -_read_json()
+  }
+  class InfraJsonAdapterError <<exception>>
+  class PlanningAdapterError <<exception>>
+
+  class DataLakeConfig <<DTO>> {
+    +storage_account: str | None
+    +filesystem: str | None
+  }
+  class MaximoAssetProvider <<helper>> {
+    +datalake: DataLakeConfig | None
+    +parquet_filesystem / parquet_path: str
+    --
+    +load_bus_assets(query): DataFrame
+  }
+  class MaximoAssetQuery <<DTO>> {
+    +assetnum_min / assetnum_max: int
+  }
+  class OmniplusAuthConfig <<DTO>> {
+    +client_id: str
+    +client_secret: str
+    +scope: str
+    +token_url: str
+    +data_base_url: str
+  }
+  class OmniplusOnClient <<client>> {
+    +config: OmniplusAuthConfig
+    +session: requests.Session
+    +timeout: float
+    +data_base_url: str
+    -_access_token: str | None
+    -_token_expiry: datetime | None
+    --
+    +get_token(force_refresh): str
+    +get_latest_signals(vins, signal_ids): dict[str, dict]
+  }
+
+  OmniplusBusProvider ..|> BusProviderPort
+  BusPlanningParquetProvider ..|> PlanningProviderPort
+  ConnectorJsonInfrastructureProvider ..|> InfrastructureProviderPort
+  OmniplusBusProvider --> OmniplusOnClient
+  MaximoAssetProvider --> DataLakeConfig
+  BusPlanningParquetProvider --> DataLakeConfig
+}
+
+package "frontend (sample DTO)" <<Rectangle>> {
+  class DynamicBusSnapshot <<DTO>> {
+    +time: float
+    +bus_vin: str
+    +bus_number: int
+    +state: str
+    +soc_percent: float | None
+    +block_id: str | None
+    +location: str | None
+  }
+}
+
+@enduml

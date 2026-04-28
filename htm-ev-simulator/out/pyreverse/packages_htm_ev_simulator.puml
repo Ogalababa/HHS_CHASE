@@ -1,0 +1,169 @@
+@startuml packages_htm_ev_simulator
+set namespaceSeparator none
+package "src.backend" as src.backend {
+}
+package "src.backend.api" as src.backend.api {
+}
+package "src.backend.core" as src.backend.core {
+}
+package "src.backend.core.models" as src.backend.core.models {
+}
+package "src.backend.core.models.laad_infra" as src.backend.core.models.laad_infra {
+}
+package "src.backend.core.models.laad_infra.charge_point" as src.backend.core.models.laad_infra.charge_point {
+}
+package "src.backend.core.models.laad_infra.charger" as src.backend.core.models.laad_infra.charger {
+}
+package "src.backend.core.models.laad_infra.connector" as src.backend.core.models.laad_infra.connector {
+}
+package "src.backend.core.models.laad_infra.exceptions" as src.backend.core.models.laad_infra.exceptions {
+}
+package "src.backend.core.models.laad_infra.grid" as src.backend.core.models.laad_infra.grid {
+}
+package "src.backend.core.models.laad_infra.location" as src.backend.core.models.laad_infra.location {
+}
+package "src.backend.core.models.planning" as src.backend.core.models.planning {
+}
+package "src.backend.core.models.planning.block" as src.backend.core.models.planning.block {
+}
+package "src.backend.core.models.planning.journey" as src.backend.core.models.planning.journey {
+}
+package "src.backend.core.models.planning.point_in_sequence" as src.backend.core.models.planning.point_in_sequence {
+}
+package "src.backend.core.models.transport" as src.backend.core.models.transport {
+}
+package "src.backend.core.models.transport.bus" as src.backend.core.models.transport.bus {
+}
+package "src.backend.core.models.transport.bus.bus" as src.backend.core.models.transport.bus.bus {
+}
+package "src.backend.core.models.transport.bus.charging_curve" as src.backend.core.models.transport.bus.charging_curve {
+}
+package "src.backend.core.models.world" as src.backend.core.models.world {
+}
+package "src.backend.core.ports" as src.backend.core.ports {
+}
+package "src.backend.core.ports.bus_port" as src.backend.core.ports.bus_port {
+}
+package "src.backend.core.ports.infra_port" as src.backend.core.ports.infra_port {
+}
+package "src.backend.core.ports.planning_port" as src.backend.core.ports.planning_port {
+}
+package "src.backend.core.services" as src.backend.core.services {
+}
+package "src.backend.core.services.minimal_charging_simulation" as src.backend.core.services.minimal_charging_simulation {
+}
+package "src.backend.core.services.simpy_charging_simulation" as src.backend.core.services.simpy_charging_simulation {
+}
+package "src.backend.core.services.simpy_engine" as src.backend.core.services.simpy_engine {
+}
+package "src.backend.core.services.simpy_engine.event_log" as src.backend.core.services.simpy_engine.event_log {
+}
+package "src.backend.core.services.simpy_engine.resource_allocator" as src.backend.core.services.simpy_engine.resource_allocator {
+}
+package "src.backend.core.services.simpy_engine.scheduler" as src.backend.core.services.simpy_engine.scheduler {
+}
+package "src.backend.core.services.simpy_visualization_service" as src.backend.core.services.simpy_visualization_service {
+}
+package "src.backend.core.services.strategies" as src.backend.core.services.strategies {
+}
+package "src.backend.core.services.strategies.base" as src.backend.core.services.strategies.base {
+}
+package "src.backend.core.services.strategies.loader" as src.backend.core.services.strategies.loader {
+}
+package "src.backend.core.services.strategies.opportunity_charging_strategy" as src.backend.core.services.strategies.opportunity_charging_strategy {
+}
+package "src.backend.core.services.strategies.power_limit_strategy" as src.backend.core.services.strategies.power_limit_strategy {
+}
+package "src.backend.core.services.strategies.precheck_replacement_strategy" as src.backend.core.services.strategies.precheck_replacement_strategy {
+}
+package "src.backend.core.services.strategies.simulation_strategy_host" as src.backend.core.services.strategies.simulation_strategy_host {
+}
+package "src.backend.core.services.strategies.start_full_soc_strategy" as src.backend.core.services.strategies.start_full_soc_strategy {
+}
+package "src.backend.core.services.visualization_simulation" as src.backend.core.services.visualization_simulation {
+}
+package "src.backend.core.services.world_builder" as src.backend.core.services.world_builder {
+}
+package "src.backend.infrastructure" as src.backend.infrastructure {
+}
+package "src.backend.infrastructure.bus_planning_parquet_provider" as src.backend.infrastructure.bus_planning_parquet_provider {
+}
+package "src.backend.infrastructure.connector_json_infra_provider" as src.backend.infrastructure.connector_json_infra_provider {
+}
+package "src.backend.infrastructure.datalake_helper" as src.backend.infrastructure.datalake_helper {
+}
+package "src.backend.infrastructure.env_loader" as src.backend.infrastructure.env_loader {
+}
+package "src.backend.infrastructure.maximo_asset_provider" as src.backend.infrastructure.maximo_asset_provider {
+}
+package "src.backend.infrastructure.omniplus_bus_provider" as src.backend.infrastructure.omniplus_bus_provider {
+}
+package "src.backend.infrastructure.omniplus_on" as src.backend.infrastructure.omniplus_on {
+}
+package "src.backend.infrastructure.omniplus_on.client" as src.backend.infrastructure.omniplus_on.client {
+}
+package "src.backend.infrastructure.omniplus_on.constants" as src.backend.infrastructure.omniplus_on.constants {
+}
+src.backend.core.models --> src.backend.core.models.world
+src.backend.core.models.laad_infra --> src.backend.core.models.laad_infra.charge_point
+src.backend.core.models.laad_infra --> src.backend.core.models.laad_infra.charger
+src.backend.core.models.laad_infra --> src.backend.core.models.laad_infra.connector
+src.backend.core.models.laad_infra --> src.backend.core.models.laad_infra.exceptions
+src.backend.core.models.laad_infra --> src.backend.core.models.laad_infra.grid
+src.backend.core.models.laad_infra --> src.backend.core.models.laad_infra.location
+src.backend.core.models.laad_infra.charger --> src.backend.core.models.laad_infra.connector
+src.backend.core.models.laad_infra.connector --> src.backend.core.models.laad_infra.exceptions
+src.backend.core.models.laad_infra.location --> src.backend.core.models.laad_infra.charger
+src.backend.core.models.laad_infra.location --> src.backend.core.models.laad_infra.grid
+src.backend.core.models.planning --> src.backend.core.models.planning.block
+src.backend.core.models.planning --> src.backend.core.models.planning.journey
+src.backend.core.models.planning --> src.backend.core.models.planning.point_in_sequence
+src.backend.core.models.planning.block --> src.backend.core.models.planning.journey
+src.backend.core.models.planning.journey --> src.backend.core.models.planning.point_in_sequence
+src.backend.core.models.transport.bus --> src.backend.core.models.transport.bus.bus
+src.backend.core.models.transport.bus --> src.backend.core.models.transport.bus.charging_curve
+src.backend.core.models.transport.bus.bus --> src.backend.core.models.transport.bus.charging_curve
+src.backend.core.models.world --> src.backend.core.models.laad_infra.grid
+src.backend.core.models.world --> src.backend.core.models.laad_infra.location
+src.backend.core.models.world --> src.backend.core.models.planning.block
+src.backend.core.models.world --> src.backend.core.models.transport.bus.bus
+src.backend.core.ports --> src.backend.core.ports.bus_port
+src.backend.core.ports --> src.backend.core.ports.infra_port
+src.backend.core.ports --> src.backend.core.ports.planning_port
+src.backend.core.services --> src.backend.core.services.minimal_charging_simulation
+src.backend.core.services --> src.backend.core.services.simpy_charging_simulation
+src.backend.core.services --> src.backend.core.services.simpy_visualization_service
+src.backend.core.services --> src.backend.core.services.visualization_simulation
+src.backend.core.services --> src.backend.core.services.world_builder
+src.backend.core.services.simpy_engine --> src.backend.core.services.simpy_engine.event_log
+src.backend.core.services.simpy_engine --> src.backend.core.services.simpy_engine.resource_allocator
+src.backend.core.services.simpy_engine --> src.backend.core.services.simpy_engine.scheduler
+src.backend.core.services.simpy_engine.scheduler --> src.backend.core.services.simpy_engine.event_log
+src.backend.core.services.simpy_engine.scheduler --> src.backend.core.services.simpy_engine.resource_allocator
+src.backend.core.services.simpy_visualization_service --> src.backend.core.services.simpy_engine.event_log
+src.backend.core.services.simpy_visualization_service --> src.backend.core.services.simpy_engine.resource_allocator
+src.backend.core.services.simpy_visualization_service --> src.backend.core.services.simpy_engine.scheduler
+src.backend.core.services.simpy_visualization_service --> src.backend.core.services.strategies.loader
+src.backend.core.services.simpy_visualization_service --> src.backend.core.services.visualization_simulation
+src.backend.core.services.strategies.base --> src.backend.core.services.strategies.simulation_strategy_host
+src.backend.core.services.strategies.loader --> src.backend.core.services.strategies.base
+src.backend.core.services.strategies.opportunity_charging_strategy --> src.backend.core.services.strategies.base
+src.backend.core.services.strategies.power_limit_strategy --> src.backend.core.services.strategies.base
+src.backend.core.services.strategies.precheck_replacement_strategy --> src.backend.core.services.strategies.base
+src.backend.core.services.strategies.start_full_soc_strategy --> src.backend.core.services.strategies.base
+src.backend.core.services.visualization_simulation --> src.backend.core.services.strategies.base
+src.backend.core.services.visualization_simulation --> src.backend.core.services.strategies.loader
+src.backend.infrastructure --> src.backend.infrastructure.bus_planning_parquet_provider
+src.backend.infrastructure --> src.backend.infrastructure.connector_json_infra_provider
+src.backend.infrastructure --> src.backend.infrastructure.maximo_asset_provider
+src.backend.infrastructure --> src.backend.infrastructure.omniplus_bus_provider
+src.backend.infrastructure.bus_planning_parquet_provider --> src.backend.infrastructure.datalake_helper
+src.backend.infrastructure.datalake_helper --> src.backend.infrastructure.env_loader
+src.backend.infrastructure.maximo_asset_provider --> src.backend.infrastructure.datalake_helper
+src.backend.infrastructure.omniplus_bus_provider --> src.backend.infrastructure.omniplus_on.client
+src.backend.infrastructure.omniplus_on --> src.backend.infrastructure.omniplus_on.client
+src.backend.infrastructure.omniplus_on --> src.backend.infrastructure.omniplus_on.constants
+src.backend.infrastructure.omniplus_on.client --> src.backend.infrastructure.omniplus_on.constants
+src.backend.core.models.laad_infra.grid ..> src.backend.core.models.laad_infra.location
+src.backend.core.models.world ..> src.backend.core.models.planning.point_in_sequence
+@enduml

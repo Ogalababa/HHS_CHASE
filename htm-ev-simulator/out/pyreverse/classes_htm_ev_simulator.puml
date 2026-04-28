@@ -1,0 +1,433 @@
+@startuml classes_htm_ev_simulator
+set namespaceSeparator none
+class "Block" as src.backend.core.models.planning.block.Block {
+  assigned_bus_vehicle_number : Optional[int]
+  block_id : str
+  journey_count : int
+  journeys : list[Journey]
+  operating_day : date
+  original_block_id
+  sim_end_time : Optional[datetime]
+  sim_start_time : Optional[datetime]
+  total_distance_km : float
+  add_journey(journey: Journey)
+  sort_journeys()
+}
+class "Bus" as src.backend.core.models.transport.bus.bus.Bus {
+  assigned_blocks : List['Block']
+  average_energy_consumption : Optional[float]
+  battery_capacity_kwh
+  charging_curve
+  charging_loss_kw
+  connected_charge_point : Optional['ChargePoint']
+  current_energy_kwh : float
+  energy_consumption_per_km : float
+  location : Optional['PointInSequence']
+  max_charging_power_kw : float | None
+  soc_percent : float
+  state : BusState
+  total_driven_distance_km : float
+  vehicle_number : int
+  vehicle_type : str
+  vin_number : str
+  calculate_actual_charging_power_kw(charger_offered_power_kw: float) -> float
+  charging_power_cap_kw(soc_percent: float) -> float
+  has_low_soc(threshold_percent: float) -> bool
+  remaining_range_km() -> float
+  update_soc(delta_kwh: float)
+}
+class "BusPlanningParquetProvider" as src.backend.infrastructure.bus_planning_parquet_provider.BusPlanningParquetProvider {
+  base_path : str
+  columns : Optional[Iterable[str]]
+  datalake : Optional[DataLakeConfig]
+  end_date : date
+  simulation_end : Optional[datetime]
+  simulation_start : Optional[datetime]
+  start_date : date
+  get_blocks() -> list[Block]
+}
+class "BusProviderPort" as src.backend.core.ports.bus_port.BusProviderPort {
+  {abstract}get_buses() -> list[Bus]
+}
+class "BusState" as src.backend.core.models.transport.bus.bus.BusState {
+  name
+}
+class "ChargePoint" as src.backend.core.models.laad_infra.charge_point.ChargePoint {
+  connected_bus : Bus | None, NoneType
+  id : int
+  connect(bus: Bus)
+  disconnect()
+}
+class "Charger" as src.backend.core.models.laad_infra.charger.Charger {
+  available_power_kw : float
+  charger_id : str
+  connectors : list[Connector]
+  current_load_kw : float
+  max_power_kw : float
+  serial_number : Optional[str]
+  software_version : Optional[str]
+  add_connector(connector: Connector) -> None
+}
+class "ChargingCurve" as src.backend.core.models.transport.bus.charging_curve.ChargingCurve {
+  a_base_kw : float
+  a_slope_kw_per_soc : float
+  b_slope_kw_per_soc : float
+  b_start_kw : float
+  c_divisor_soc : float
+  c_factor_kw : float
+  stage_a_end_soc : float
+  stage_b_end_soc : float
+  actual_battery_power_kw() -> float
+  clamp_soc_percent(value: float) -> float
+  power_cap_kw(soc_percent: float) -> float
+}
+class "ChargingTrace" as src.backend.core.services.minimal_charging_simulation.ChargingTrace {
+  duration_seconds : int
+  soc_per_second : list[float]
+}
+class "ChargingTrace" as src.backend.core.services.simpy_charging_simulation.ChargingTrace {
+  duration_seconds : int
+  soc_per_second : list[float]
+}
+class "ClassifiedLogger" as src.backend.core.services.visualization_simulation.ClassifiedLogger {
+  bus_log : list[dict[str, Any]]
+  laadinfra_log : list[dict[str, Any]]
+  planning_log : list[dict[str, Any]]
+}
+class "Connector" as src.backend.core.models.laad_infra.connector.Connector {
+  connected_bus : Optional['Bus']
+  connection_name : Optional[str]
+  connector_id : str
+  connector_type : str
+  current_power_kw : float
+  is_available : bool
+  max_power_kw : float
+  offered_power_kw : float
+  raster_code : Optional[str]
+  status : str
+  connect_bus(bus: 'Bus') -> None
+  disconnect_bus() -> None
+  set_charging() -> None
+  set_connected() -> None
+}
+class "ConnectorJsonInfrastructureProvider" as src.backend.infrastructure.connector_json_infra_provider.ConnectorJsonInfrastructureProvider {
+  json_path : Path
+  power_limits_path : Optional[Path]
+  get_grids() -> list[Grid]
+  get_location_grid_links() -> list[tuple[str, str]]
+  get_locations() -> list[Location]
+}
+class "<color:red>ConnectorOccupiedError</color>" as src.backend.core.models.laad_infra.exceptions.ConnectorOccupiedError {
+}
+class "DataLakeConfig" as src.backend.infrastructure.datalake_helper.DataLakeConfig {
+  account_url : str
+  filesystem : Optional[str]
+  storage_account : Optional[str]
+}
+class "<color:red>DuplicateEntityIdError</color>" as src.backend.core.models.world.DuplicateEntityIdError {
+}
+class "<color:red>EntityNotFoundError</color>" as src.backend.core.models.world.EntityNotFoundError {
+}
+class "Grid" as src.backend.core.models.laad_infra.grid.Grid {
+  available_power_profile : Optional[AvailablePowerProfileKw]
+  connected_locations : list['Location']
+  current_total_load_kw : float
+  grid_id : str
+  name : Optional[str]
+  connect_location(location: 'Location') -> None
+  get_available_power_at(time: datetime) -> float
+  get_remaining_capacity_at(time: datetime) -> float
+}
+class "<color:red>InfraJsonAdapterError</color>" as src.backend.infrastructure.connector_json_infra_provider.InfraJsonAdapterError {
+}
+class "InfrastructureProviderPort" as src.backend.core.ports.infra_port.InfrastructureProviderPort {
+  {abstract}get_grids() -> list[Grid]
+  get_location_grid_links() -> list[tuple[str, str]]
+  {abstract}get_locations() -> list[Location]
+}
+class "InternalEventLog" as src.backend.core.services.simpy_engine.event_log.InternalEventLog {
+  bus_log : list[dict[str, Any]]
+  laadinfra_log : list[dict[str, Any]]
+  planning_log : list[dict[str, Any]]
+}
+class "Journey" as src.backend.core.models.planning.journey.Journey {
+  block_id : str | None
+  charging_points : list[PointInSequence]
+  direction_type : str | None
+  duration : timedelta
+  duration_hours : float
+  duration_minutes : float
+  duration_seconds : float
+  duration_str : str
+  end_point : PointInSequence | None
+  first_departure_datetime : datetime | None
+  internal_line_number : str | None
+  journey_id : str
+  journey_ref : str
+  journey_type : str
+  last_arrival_datetime : datetime | None
+  original_journey_id : str
+  point_count : int
+  points : List[PointInSequence]
+  public_line_number : str
+  sim_end_time : Optional[datetime]
+  sim_start_time : Optional[datetime]
+  start_point : PointInSequence | None
+  total_distance_km : float
+  transport_mode : str | None
+  vehicle_type : str
+  version_type : str
+  wait_points : list[PointInSequence]
+  add_point(point: PointInSequence) -> None
+  sort_points() -> None
+}
+class "<color:red>LaadInfraDomainError</color>" as src.backend.core.models.laad_infra.exceptions.LaadInfraDomainError {
+}
+class "Location" as src.backend.core.models.laad_infra.location.Location {
+  chargers : dict[str, Charger]
+  current_load_kw : float
+  grid : Grid | None
+  latitude : float
+  location_id : str
+  longitude : float
+  max_power_profile : PowerProfileKw | None
+  physical_max_power_profile : PowerProfileKw | None
+  point_id : str | None
+  remaining_capacity_kw : float
+  get_available_power_at(time: datetime) -> float
+  get_max_power_at(time: datetime) -> float
+  get_or_create_charger(charger_id: str) -> Charger
+  get_physical_max_power_at(time: datetime) -> float
+}
+class "LocationPowerAllocator" as src.backend.core.services.simpy_engine.resource_allocator.LocationPowerAllocator {
+  power_limit_enabled : bool
+  allocate_power_kw() -> float
+  apply_energy(bus: Bus, power_kw: float, dt_seconds: int) -> None
+  location_current_load_kw(location: Location) -> float
+  reset() -> None
+}
+class "MaximoAssetProvider" as src.backend.infrastructure.maximo_asset_provider.MaximoAssetProvider {
+  datalake : DataLakeConfig | None
+  parquet_filesystem : str
+  parquet_path : str
+  load_bus_assets() -> pd.DataFrame
+}
+class "MaximoAssetQuery" as src.backend.infrastructure.maximo_asset_provider.MaximoAssetQuery {
+  assetnum_max : int
+  assetnum_min : int
+}
+class "OmniplusAuthConfig" as src.backend.infrastructure.omniplus_on.client.OmniplusAuthConfig {
+  client_id : str
+  client_secret : str
+  data_base_url : str
+  scope : str
+  token_url : str
+}
+class "OmniplusBusProvider" as src.backend.infrastructure.omniplus_bus_provider.OmniplusBusProvider {
+  client
+  default_battery_capacity_kwh : float
+  vin_to_vehicle_number : Optional[dict[str, int]]
+  vins : list[str]
+  get_buses() -> list[Bus]
+}
+class "OmniplusOnClient" as src.backend.infrastructure.omniplus_on.client.OmniplusOnClient {
+  config : NoneType
+  data_base_url : str
+  session : Session
+  timeout : float
+  get_latest_signals(vins: list[str]) -> dict[str, dict]
+  get_token() -> str
+}
+class "OpportunityChargingStrategy" as src.backend.core.services.strategies.opportunity_charging_strategy.OpportunityChargingStrategy {
+  enabled_by_default : bool
+  strategy_key : str
+  after_journey(service, state: StrategyRuntimeState) -> None
+  before_journey(service, state: StrategyRuntimeState) -> None
+}
+class "<color:red>PlanningAdapterError</color>" as src.backend.infrastructure.bus_planning_parquet_provider.PlanningAdapterError {
+}
+class "PlanningProviderPort" as src.backend.core.ports.planning_port.PlanningProviderPort {
+  {abstract}get_blocks() -> list[Block]
+}
+class "PointInSequence" as src.backend.core.models.planning.point_in_sequence.PointInSequence {
+  arrival_datetime : datetime
+  charging_location : NoneType, Optional['Location']
+  departure_datetime : datetime
+  distance_km : float
+  distance_to_next_m : Optional[float]
+  dwell_time : timedelta
+  gps : tuple[float, float]
+  is_charging_location : bool
+  is_wait_point : bool
+  latitude : float
+  longitude : float
+  name : str
+  point_id : str
+  sequence_order : int
+  sim_bus_state_at_arrival : Optional['BusState']
+  sim_bus_state_at_departure : Optional['BusState']
+  sim_range_at_arrival : Optional[float]
+  sim_range_at_departure : Optional[float]
+  sim_soc_at_arrival : Optional[float]
+  sim_soc_at_departure : Optional[float]
+  stop_area : Optional[int]
+  tariff_zone : Optional[int]
+  total_stop_time : timedelta
+  wait_time : timedelta
+}
+class "PowerLimitStrategy" as src.backend.core.services.strategies.power_limit_strategy.PowerLimitStrategy {
+  enabled_by_default : bool
+  strategy_key : str
+  after_journey(service, state: StrategyRuntimeState) -> None
+  before_journey(service, state: StrategyRuntimeState) -> None
+}
+class "PrecheckReplacementStrategy" as src.backend.core.services.strategies.precheck_replacement_strategy.PrecheckReplacementStrategy {
+  enabled_by_default : bool
+  strategy_key : str
+  after_journey(service, state: StrategyRuntimeState) -> None
+  before_journey(service, state: StrategyRuntimeState) -> None
+}
+class "SimpyScheduler" as src.backend.core.services.simpy_engine.scheduler.SimpyScheduler {
+  allocator
+  charging_step_seconds : int
+  charging_target_soc_percent : float
+  logger
+  low_soc_alert_threshold_percent : float
+  opportunity_charging_min_gap_seconds : int
+  opportunity_charging_soc_threshold_percent : float
+  simulation_end_timestamp : float | None
+  simulation_start_timestamp : float
+  strategies : list[Any]
+  world
+  run(env, blocks: list[Block], buses: list[Bus]) -> dict[str, Any]
+}
+class "SimulationStrategy" as src.backend.core.services.strategies.base.SimulationStrategy {
+  strategy_key : str
+  {abstract}after_journey(service: SimulationStrategyHost, state: StrategyRuntimeState) -> None
+  {abstract}before_journey(service: SimulationStrategyHost, state: StrategyRuntimeState) -> None
+}
+class "SimulationStrategyHost" as src.backend.core.services.strategies.simulation_strategy_host.SimulationStrategyHost {
+  charging_step_seconds : int
+  charging_target_soc_percent : float
+  low_soc_alert_threshold_percent : float
+  opportunity_charging_min_gap_seconds : int
+  opportunity_charging_soc_threshold_percent : float
+}
+class "StartFullSocStrategy" as src.backend.core.services.strategies.start_full_soc_strategy.StartFullSocStrategy {
+  enabled_by_default : bool
+  strategy_key : str
+  after_journey(service, state: StrategyRuntimeState) -> None
+  before_journey(service, state: StrategyRuntimeState) -> None
+}
+class "StrategyRuntimeState" as src.backend.core.services.strategies.base.StrategyRuntimeState {
+  active_bus
+  assign_time : float
+  block
+  bus_available_at : dict[str, float]
+  buses : list[Bus]
+  journey
+  journey_end : float | None
+  journey_index : int
+  journey_skipped : bool
+  logger : Any
+  world : Any
+}
+class "VisualizationSimulationResult" as src.backend.core.services.visualization_simulation.VisualizationSimulationResult {
+  classified_logger
+  completed_journeys : set[Journey]
+  current_time : float
+  simulation_end_time : float | None
+  simulation_start_time : float | None
+  skipped_blocks : set[Block]
+  skipped_journeys : set[Journey]
+  world
+}
+class "VisualizationSimulationService" as src.backend.core.services.simpy_visualization_service.VisualizationSimulationService {
+  charging_step_seconds : int
+  charging_target_soc_percent : float
+  enable_opportunity_charging_strategy : bool
+  enable_power_limit_strategy : bool
+  enable_precheck_replacement_strategy : bool
+  enable_start_full_soc_strategy : bool
+  low_soc_alert_threshold_percent : float
+  opportunity_charging_min_gap_seconds : int
+  opportunity_charging_soc_threshold_percent : float
+  simulation_end_timestamp : float | None
+  simulation_start_timestamp : float | None
+  strategy_flags : dict[str, bool]
+  run(world: World) -> VisualizationSimulationResult
+}
+class "VisualizationSimulationService" as src.backend.core.services.visualization_simulation.VisualizationSimulationService {
+  charging_step_seconds : int
+  charging_target_soc_percent : float
+  default_charger_power_kw : float
+  enable_opportunity_charging_strategy : bool
+  enable_power_limit_strategy : bool
+  enable_precheck_replacement_strategy : bool
+  enable_start_full_soc_strategy : bool
+  low_soc_alert_threshold_percent : float
+  opportunity_charging_min_gap_seconds : int
+  opportunity_charging_soc_threshold_percent : float
+  simulation_end_timestamp : float | None
+  simulation_start_timestamp : float | None
+  strategy_flags : dict[str, bool]
+  run(world: World) -> VisualizationSimulationResult
+}
+class "VisualizationWorldView" as src.backend.core.services.visualization_simulation.VisualizationWorldView {
+  blocks : dict[str, Block]
+  buses : list[Bus]
+  locations : dict[str, Location]
+}
+class "World" as src.backend.core.models.world.World {
+  blocks_by_id : dict[str, Block]
+  buses_by_vehicle_number : dict[int, Bus]
+  grids_by_id : dict[str, Grid]
+  locations_by_id : dict[str, Location]
+  add_block(block: Block) -> None
+  add_bus(bus: Bus) -> None
+  add_grid(grid: Grid) -> None
+  add_location(location: Location) -> None
+  attach_locations_to_points(points: Iterable['PointInSequence']) -> None
+  connect_location_to_grid() -> None
+  get_block(block_id: str) -> Block
+  get_bus(vehicle_number: int) -> Bus
+  get_grid(grid_id: str) -> Grid
+  get_location(location_id: str) -> Location
+}
+class "WorldBuildResult" as src.backend.core.services.world_builder.WorldBuildResult {
+  n_blocks : int
+  n_buses : int
+  n_grids : int
+  n_journeys : int
+  n_locations : int
+  n_points : int
+  world
+}
+class "WorldBuilder" as src.backend.core.services.world_builder.WorldBuilder {
+  build() -> WorldBuildResult
+}
+class "<color:red>WorldDomainError</color>" as src.backend.core.models.world.WorldDomainError {
+}
+src.backend.core.models.laad_infra.exceptions.ConnectorOccupiedError --|> src.backend.core.models.laad_infra.exceptions.LaadInfraDomainError
+src.backend.core.models.world.DuplicateEntityIdError --|> src.backend.core.models.world.WorldDomainError
+src.backend.core.models.world.EntityNotFoundError --|> src.backend.core.models.world.WorldDomainError
+src.backend.infrastructure.bus_planning_parquet_provider.BusPlanningParquetProvider --|> src.backend.core.ports.planning_port.PlanningProviderPort
+src.backend.infrastructure.connector_json_infra_provider.ConnectorJsonInfrastructureProvider --|> src.backend.core.ports.infra_port.InfrastructureProviderPort
+src.backend.infrastructure.omniplus_bus_provider.OmniplusBusProvider --|> src.backend.core.ports.bus_port.BusProviderPort
+src.backend.core.services.strategies.base.StrategyRuntimeState --> src.backend.core.models.planning.block.Block : block
+src.backend.core.models.planning.block.Block --> src.backend.core.models.planning.journey.Journey : journeys
+src.backend.core.services.strategies.base.StrategyRuntimeState --> src.backend.core.models.planning.journey.Journey : journey
+src.backend.core.models.planning.journey.Journey --> src.backend.core.models.planning.point_in_sequence.PointInSequence : points
+src.backend.core.services.strategies.base.StrategyRuntimeState --> src.backend.core.models.transport.bus.bus.Bus : active_bus
+src.backend.core.models.transport.bus.bus.Bus --> src.backend.core.models.transport.bus.charging_curve.ChargingCurve : charging_curve
+src.backend.core.services.simpy_engine.scheduler.SimpyScheduler --> src.backend.core.models.world.World : world
+src.backend.core.services.world_builder.WorldBuildResult --> src.backend.core.models.world.World : world
+src.backend.core.services.simpy_engine.scheduler.SimpyScheduler --> src.backend.core.services.simpy_engine.event_log.InternalEventLog : logger
+src.backend.core.services.simpy_engine.scheduler.SimpyScheduler --> src.backend.core.services.simpy_engine.resource_allocator.LocationPowerAllocator : allocator
+src.backend.core.services.visualization_simulation.VisualizationSimulationResult --> src.backend.core.services.visualization_simulation.ClassifiedLogger : classified_logger
+src.backend.core.services.visualization_simulation.VisualizationSimulationResult --> src.backend.core.services.visualization_simulation.VisualizationWorldView : world
+src.backend.infrastructure.omniplus_bus_provider.OmniplusBusProvider --> src.backend.infrastructure.omniplus_on.client.OmniplusOnClient : client
+src.backend.core.models.planning.point_in_sequence.PointInSequence --o src.backend.core.models.transport.bus.bus.Bus : location
+src.backend.core.models.transport.bus.bus.Bus --o src.backend.core.models.laad_infra.charge_point.ChargePoint : connected_bus
+src.backend.infrastructure.omniplus_on.client.OmniplusAuthConfig --o src.backend.infrastructure.omniplus_on.client.OmniplusOnClient : config
+@enduml
