@@ -968,9 +968,19 @@ def generate_breakdown_table_body(
         
         # Journey and point rows (nested under block)
         # Sort journeys by start time (earliest first)
+        def _journey_start_sort_key(item: tuple[str, Dict[str, Any]]) -> float:
+            jid, jdata = item
+            if jdata.get('journey_start_time') is not None:
+                return float(jdata['journey_start_time'])
+            if block:
+                j_obj = next((j for j in block.journeys if j.journey_id == jid), None)
+                if j_obj and j_obj.first_departure_datetime:
+                    return float(j_obj.first_departure_datetime.timestamp())
+            return float('inf')
+
         sorted_journeys = sorted(
             block_data['journeys'].items(),
-            key=lambda x: x[1]['journey_start_time'] if x[1]['journey_start_time'] is not None else float('inf')
+            key=_journey_start_sort_key,
         )
         # If a journey is skipped due to low SOC during execution, downstream
         # journeys in the same block that never started should be marked skipped
@@ -1449,6 +1459,15 @@ def generate_breakdown_table_body(
             display_journey_id = getattr(journey, 'original_journey_id', journey_id) if journey else journey_id
             journey_status = " ⚠️ SKIPPED" if journey_skipped else ""
             journey_row_class = "journey-row hidden indent-1" + (" skipped-journey" if journey_skipped else "")
+            journey_type_value = str(getattr(journey, 'journey_type', '') or '').strip().lower() if journey else ""
+            journey_id_style = ""
+            if journey_type_value == "servicejourney":
+                journey_id_style = "color:#1b8f3a; font-weight:600;"
+            elif journey_type_value == "deadrun":
+                journey_id_style = "color:#c62828; font-weight:600;"
+            display_journey_id_html = html.escape(str(display_journey_id))
+            if journey_id_style:
+                display_journey_id_html = f"<span style=\"{journey_id_style}\">{display_journey_id_html}</span>"
             
             # For return journey, use the original bus number (not replacement bus)
             # For regular journey with replacement, use replacement bus number
@@ -1462,7 +1481,7 @@ def generate_breakdown_table_body(
             html_rows.append(f"""
         <tr class="{journey_row_class}" data-parent-id="block-{block_id_safe}" id="journey-{journey_id_safe}">
             <td class="toggle" onclick="toggleVisibility('journey-{journey_id_safe}')">
-                <span class="icon">▶</span> {display_journey_id}{journey_status}
+                <span class="icon">▶</span> {display_journey_id_html}{journey_status}
             </td>
             <td>{journey_distance:.2f}</td>
             <td>{journey_start_str}</td>
@@ -1552,23 +1571,29 @@ def generate_breakdown_table_body(
                         if sorted_points and sorted_points[0].get('point_id') == prev_last_point.get('point_id'):
                             skip_first_point = True
             
-            # Check if first point's time matches journey_start_time (duplicate start point)
-            # If so, skip the first point to avoid duplication
-            if not skip_first_point and sorted_points and journey_data.get('journey_start_time'):
-                first_point_time = sorted_points[0].get('time')
-                journey_start_time = journey_data.get('journey_start_time')
-                # If first point time matches journey start time (within 1 second tolerance), skip it
-                if first_point_time is not None and journey_start_time is not None:
-                    time_diff = abs(first_point_time - journey_start_time)
-                    if time_diff <= 1.0:  # 1 second tolerance
-                        skip_first_point = True
-            
             # Create a list of points to display (excluding skipped first point)
             points_to_display = sorted_points
             if skip_first_point and sorted_points:
                 points_to_display = sorted_points[1:]  # Skip first point
             else:
                 points_to_display = sorted_points
+
+            # Keep report semantics clear: each journey must show at least origin and destination records.
+            if len(sorted_points) >= 2:
+                origin_point = sorted_points[0]
+                destination_point = sorted_points[-1]
+                has_origin = any(
+                    p.get('point_id') == origin_point.get('point_id') and p.get('time') == origin_point.get('time')
+                    for p in points_to_display
+                )
+                has_destination = any(
+                    p.get('point_id') == destination_point.get('point_id') and p.get('time') == destination_point.get('time')
+                    for p in points_to_display
+                )
+                if not has_origin:
+                    points_to_display = [origin_point] + points_to_display
+                if not has_destination:
+                    points_to_display = points_to_display + [destination_point]
             
             for point_index, point in enumerate(points_to_display):
                 point_id_safe = str(point['point_id']).replace(':', '-').replace('/', '-').replace(' ', '-')

@@ -130,7 +130,11 @@ class DepotReturnDispatchStrategy:
 
     def _eligible_candidates(self, state: StrategyRuntimeState) -> list:
         required_vehicle_type = getattr(state.active_bus, "vehicle_type", None)
+        origin_pid = self._journey_origin_point_id(state)
         candidates = [bus for bus in state.buses if self._is_bus_available_for_assignment(state, bus)]
+        # Hard constraint: only buses currently waiting at journey origin may be assigned.
+        if origin_pid:
+            candidates = [bus for bus in candidates if self._bus_point_id(bus) == origin_pid]
         if required_vehicle_type:
             typed = [bus for bus in candidates if bus.vehicle_type == required_vehicle_type]
             if typed:

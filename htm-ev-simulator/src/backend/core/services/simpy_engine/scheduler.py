@@ -142,6 +142,35 @@ class SimpyScheduler:
             return sorted(available, key=lambda b: (-b.soc_percent, b.vehicle_number))[0]
         return sorted(candidates, key=lambda b: (bus_available_at.get(b.vin_number, 0.0), b.vehicle_number))[0]
 
+    @staticmethod
+    def _select_bus_for_time_at_origin(
+        buses: list[Bus],
+        bus_available_at: dict[str, float],
+        target_time: float,
+        origin_point_id: str,
+        required_vehicle_type: str | None = None,
+    ) -> Bus | None:
+        """
+        Select an available bus that is physically waiting at journey origin.
+
+        Rationale: Block assignment must respect operational feasibility.
+        Dispatching from a different station is disallowed by business rule.
+        """
+        origin = str(origin_point_id or "")
+        candidates = [
+            b
+            for b in buses
+            if str(getattr(getattr(b, "location", None), "point_id", "")) == origin
+            and bus_available_at.get(b.vin_number, 0.0) <= target_time
+        ]
+        if required_vehicle_type:
+            typed = [b for b in candidates if b.vehicle_type == required_vehicle_type]
+            if typed:
+                candidates = typed
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda b: (-b.soc_percent, b.vehicle_number))[0]
+
     def _can_complete_journey(self, bus: Bus, journey: Journey) -> bool:
         # Business rule: garage-return journeys ignore SOC gate.
         if self._is_garage_destination_journey(journey):
@@ -364,6 +393,19 @@ class SimpyScheduler:
                 "bus_number": bus.vehicle_number,
             }
         )
+        self.logger.planning_log.append(
+            {
+                "event": "bus_location_update",
+                "time": start_ts,
+                "bus_vin": bus.vin_number,
+                "bus_number": bus.vehicle_number,
+                "block_id": block.block_id,
+                "journey_id": journey.journey_id,
+                "point_id": first_point.point_id,
+                "point_name": first_point.name,
+                "reason": "journey_start",
+            }
+        )
         self.logger.bus_log.append(
             {
                 "event": "state_update",
@@ -388,6 +430,19 @@ class SimpyScheduler:
                     "bus_number": bus.vehicle_number,
                     "point_id": point.point_id,
                     "point_name": point.name,
+                }
+            )
+            self.logger.planning_log.append(
+                {
+                    "event": "bus_location_update",
+                    "time": arrival_ts,
+                    "bus_vin": bus.vin_number,
+                    "bus_number": bus.vehicle_number,
+                    "block_id": block.block_id,
+                    "journey_id": journey.journey_id,
+                    "point_id": point.point_id,
+                    "point_name": point.name,
+                    "reason": "point_arrival",
                 }
             )
             distance_km = (float(point.distance_to_next_m) / 1000.0) if point.distance_to_next_m else 0.0
@@ -468,9 +523,13 @@ class SimpyScheduler:
         skipped_journeys: set[Journey] = set()
         skipped_blocks: set[Block] = set()
         bus_available_at: dict[str, float] = {b.vin_number: self.simulation_start_timestamp for b in buses}
+        garage_point = self._find_point_by_id(self.world, "30002") or self._build_virtual_garage_point(self.world)
 
         for bus in buses:
             bus.state = BusState.AVAILABLE
+            # Force deterministic simulation start: all buses start from Garage Telexstraat (30002).
+            if garage_point is not None:
+                bus.location = garage_point
             self.logger.bus_log.append(
                 {
                     "event": "state_update",
@@ -486,10 +545,23 @@ class SimpyScheduler:
                 }
             )
 
+        def _block_first_departure(block: Block) -> datetime:
+            departures = [
+                j.first_departure_datetime
+                for j in getattr(block, "journeys", [])
+                if getattr(j, "first_departure_datetime", None) is not None
+            ]
+            return min(departures) if departures else datetime.min
+
         for block in sorted(
             blocks,
-            key=lambda b: b.journeys[0].first_departure_datetime if b.journeys and b.journeys[0].first_departure_datetime else datetime.min,
+            key=_block_first_departure,
         ):
+            # Ensure journeys are always processed in chronological order.
+            block.journeys = sorted(
+                block.journeys,
+                key=lambda j: j.points[0].departure_datetime.timestamp() if j.points else 0.0,
+            )
             block_start_dt = block.journeys[0].first_departure_datetime if block.journeys else None
             if block_start_dt is None:
                 continue
@@ -507,12 +579,31 @@ class SimpyScheduler:
                 if self.simulation_end_timestamp is not None and journey_start > self.simulation_end_timestamp:
                     continue
                 if current_bus is None:
-                    current_bus = self._select_bus_for_time(
+                    origin_point_id = str(getattr(journey.points[0], "point_id", ""))
+                    current_bus = self._select_bus_for_time_at_origin(
                         buses,
                         bus_available_at,
                         journey_start,
+                        origin_point_id=origin_point_id,
                         required_vehicle_type=getattr(block, "vehicle_type", None),
                     )
+                    if current_bus is None:
+                        skipped_blocks.add(block)
+                        skipped_journeys.add(journey)
+                        self.logger.planning_log.append(
+                            {
+                                "event": "block_skipped",
+                                "time": journey_start,
+                                "block_id": block.block_id,
+                                "journey_id": journey.journey_id,
+                                "reason": (
+                                    f"No available bus at origin point {origin_point_id}"
+                                    if origin_point_id
+                                    else "No available bus at journey origin point"
+                                ),
+                            }
+                        )
+                        break
                     block_assigned_time = journey_start
                     self.logger.planning_log.append(
                         {
@@ -573,6 +664,19 @@ class SimpyScheduler:
                 garage_point = self._find_point_by_id(self.world, "30002") or self._build_virtual_garage_point(self.world)
                 if garage_point is not None:
                     current_bus.location = garage_point
+                    self.logger.planning_log.append(
+                        {
+                            "event": "bus_location_update",
+                            "time": block_end_time if block_end_time is not None else bus_available_at[current_bus.vin_number],
+                            "bus_vin": current_bus.vin_number,
+                            "bus_number": current_bus.vehicle_number,
+                            "block_id": block.block_id,
+                            "journey_id": None,
+                            "point_id": garage_point.point_id,
+                            "point_name": garage_point.name,
+                            "reason": "block_end_dispatch_to_garage",
+                        }
+                    )
                 charge_start = block_end_time if block_end_time is not None else bus_available_at[current_bus.vin_number]
                 self._maybe_charge(
                     current_bus,
