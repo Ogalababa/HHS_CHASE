@@ -1195,6 +1195,13 @@ def generate_breakdown_table_body(
             )
             strategy_name = html.escape(str(explain_info.get('strategy') or 'N/A'))
             mode_name = html.escape(str(explain_info.get('assignment_mode') or 'N/A'))
+            mode_badge_html = ""
+            if (explain_info.get('strategy') == "bus_fill_assignment") or (explain_info.get('assignment_mode') == "bus_fill"):
+                mode_badge_html = (
+                    "<span style=\"margin-left:8px; padding:2px 8px; border-radius:999px; "
+                    "background:#e8f5e9; color:#1b5e20; font-size:12px; font-weight:600;\">"
+                    "GLOBAL BUS TIMELINE FILL</span>"
+                )
             selected_bus = html.escape(str(explain_info.get('selected_bus_number') or 'N/A'))
             selected_point = html.escape(str(explain_info.get('selected_bus_point_id') or 'N/A'))
             selected_soc = explain_info.get('selected_bus_soc_percent')
@@ -1238,6 +1245,7 @@ def generate_breakdown_table_body(
                 <div style="line-height: 1.45;">
                     <strong>Assignment Explainability</strong>
                     <span style="color:#666;">[{strategy_name}/{mode_name}]</span>
+                    {mode_badge_html}
                     <span style="color:#666;">@ {explain_time_str}</span>
                     <div style="margin-top: 4px;">
                         <strong>Decision:</strong>
@@ -1463,7 +1471,11 @@ def generate_breakdown_table_body(
             journey_id_style = ""
             if journey_type_value == "servicejourney":
                 journey_id_style = "color:#1b8f3a; font-weight:600;"
-            elif journey_type_value == "deadrun":
+            elif (
+                journey_type_value == "deadrun"
+                and block is not None
+                and len(getattr(block, "journeys", [])) == 1
+            ):
                 journey_id_style = "color:#c62828; font-weight:600;"
             display_journey_id_html = html.escape(str(display_journey_id))
             if journey_id_style:

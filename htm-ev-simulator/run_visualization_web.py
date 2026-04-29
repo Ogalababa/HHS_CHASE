@@ -222,6 +222,10 @@ def _build_form_page(message: str = "", error: str = "") -> str:
         <input type="checkbox" name="enable_depot_return_dispatch_strategy" checked />
         Enable smart block assignment strategy (optimize first-journey assignment for all blocks with depot-return optimization)
       </label>
+      <label>
+        <input type="checkbox" name="enable_bus_fill_assignment_strategy" checked />
+        Enable bus-fill assignment strategy (fill one bus timeline by origin continuity, then proceed to next bus)
+      </label>
     </fieldset>
 
     <fieldset>
@@ -344,6 +348,8 @@ def _build_runner_args(form: dict[str, list[str]]) -> list[str]:
         args.append("--enable-power-limit-strategy")
     if "enable_depot_return_dispatch_strategy" in form:
         args.append("--enable-depot-return-dispatch-strategy")
+    if "enable_bus_fill_assignment_strategy" in form:
+        args.append("--enable-bus-fill-assignment-strategy")
 
     vins = v("omniplus_vins", "")
     if vins:

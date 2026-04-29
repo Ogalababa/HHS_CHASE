@@ -39,6 +39,7 @@ class StrategyRuntimeState:
     logger: Any
     journey_end: float | None = None
     journey_skipped: bool = False
+    assignment_locked: bool = False
 
 
 class SimulationStrategy(Protocol):

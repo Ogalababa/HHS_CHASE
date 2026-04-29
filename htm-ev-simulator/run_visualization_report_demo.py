@@ -236,6 +236,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "and prefer an idle bus waiting at that inferred origin stop."
         ),
     )
+    parser.add_argument(
+        "--enable-bus-fill-assignment-strategy",
+        action="store_true",
+        help=(
+            "Fill one bus timeline at a time by origin-point continuity, then move to next bus until all possible blocks are assigned."
+        ),
+    )
 
     parser.add_argument(
         "--report-path",
@@ -418,6 +425,7 @@ def main() -> None:
         enable_start_full_soc_strategy=args.enable_start_full_soc_strategy,
         enable_power_limit_strategy=args.enable_power_limit_strategy,
         enable_depot_return_dispatch_strategy=args.enable_depot_return_dispatch_strategy,
+        enable_bus_fill_assignment_strategy=args.enable_bus_fill_assignment_strategy,
         simulation_start_timestamp=sim_start_dt.timestamp(),
         simulation_end_timestamp=sim_end_dt.timestamp(),
     )

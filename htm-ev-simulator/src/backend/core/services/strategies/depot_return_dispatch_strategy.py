@@ -263,6 +263,8 @@ class DepotReturnDispatchStrategy:
         return out[:top_n]
 
     def before_journey(self, service, state: StrategyRuntimeState) -> None:
+        if state.assignment_locked:
+            return
         # This strategy owns block assignment. Only act at first journey.
         if state.journey_index != 0:
             return
